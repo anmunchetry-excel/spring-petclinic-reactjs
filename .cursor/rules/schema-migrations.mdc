@@ -1,0 +1,55 @@
+---
+description: How database schema changes must be made — there is no migration framework
+globs: src/main/resources/db/**/*.sql,src/main/resources/application*.properties,src/main/java/**/model/**/*.java
+alwaysApply: false
+---
+
+# Schema changes: no migration framework exists
+
+**Neither Flyway nor Liquibase is present** — not in `pom.xml`, not in the packaged jar. The
+schema comes only from hand-written SQL, with Hibernate disabled
+(`spring.jpa.hibernate.ddl-auto=none` in every profile).
+
+## The trap
+
+`initDB.sql` is **drop-and-recreate**, not incremental:
+
+```sql
+DROP TABLE vet_specialties IF EXISTS;
+...
+CREATE TABLE owners ( ... );
+```
+
+There is no version table and no up/down concept. Consequences:
+
+- Under the default in-memory HSQLDB the schema is rebuilt on **every startup**, so any edit
+  you make *always appears to work locally*.
+- A persistent MySQL or PostgreSQL database never re-runs the script. It silently keeps the old
+  schema, with **no error**.
+
+Never conclude a schema change works because it worked against HSQLDB.
+
+## Rules
+
+1. A schema change must be applied to **all three dialects** —
+   `db/{hsqldb,mysql,postgresql}/initDB.sql` — or explicitly justified as one-dialect.
+2. MySQL and PostgreSQL have `spring.sql.init.*` **commented out**; they are initialised
+   manually. Update `petclinic_db_setup_*.txt` if the procedure changes.
+3. **Entity annotations do not create schema.** `Role` declares
+   `@UniqueConstraint(columnNames = {"username", "role"})`, but because `ddl-auto=none` it is
+   never created and duplicate rows are possible. If you add a constraint in an entity, add it
+   to the DDL too.
+4. Adding a real migration tool is tracked as `AUTH-14` / `XC-03`. **Propose it before
+   hand-editing DDL for remediation work** — it already blocks five known fixes:
+
+   | Pending change | Needed for |
+   |---|---|
+   | widen `users.password` (`VARCHAR(20)` cannot hold a bcrypt hash) | `AUTH-03`, `AUTH-06` |
+   | add the `roles` uniqueness constraint | `AUTH-13` |
+   | add uniqueness on `specialties.name` | `VET-01`, `VET-02` |
+   | add uniqueness on `vet_specialties` | `VET-07` |
+   | reconcile `owners.telephone` width with its validation | `OWN-09` |
+
+5. Seed data lives in `populateDB.sql`. The baseline is 10 owners, 13 pets, 6 pet types,
+   4 visits, 6 vets, 3 specialties and 1 user. Restarting the backend reseeds the in-memory
+   database — the quickest way to undo test mutations.

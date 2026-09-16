@@ -1,0 +1,53 @@
+---
+description: Core facts about this repository that are easy to get wrong
+alwaysApply: true
+---
+
+# Spring PetClinic — what this repo actually is
+
+Two halves from **different upstream projects**, not one app:
+
+- **Backend**: `spring-petclinic-rest` 3.2.1 (Spring Boot 3.2.1), port **9966**, context path
+  **`/petclinic/`**. API base is `http://localhost:9966/petclinic/api`.
+- **Frontend**: a 2016 React 15 + TypeScript SPA in `client/`, written against an **older**
+  PetClinic API. Runs on port 4444 (`$env:PORT=4444; npm start`).
+
+The frontend does not proxy the API — the backend URL is compiled into the bundle, so every
+call is cross-origin.
+
+## ⚠ Destructive endpoint — never call casually
+
+`DELETE /api/pettypes/{id}` **deletes every pet of that type and all their visits**, then
+returns `204` as if nothing unusual happened. Verified: deleting type 1 (cat) took the pet count
+from 13 to 9. There is no confirmation, no warning in the response, and no recovery — the
+in-memory database must be reseeded by restarting the backend. Tracked as `PET-05` / `XC-07`.
+
+## Before you trust a claim
+
+Authoritative, evidence-based documentation lives in `docs/baseline/` — one PRD per slice
+(`AUTH-`, `OWN-`, `PET-`, `VIS-`, `VET-` gap IDs), plus `CROSS_CUTTING_BASELINE_PRD.md` (`XC-`)
+and `BASELINE_UPDATES_FOR_MODERNIZATION.md` (`B`/`F`). **`ARCHITECTURE.md` carries the map of
+the whole set** — start there.
+
+Read the relevant one before concluding something is broken; most "bugs" are already documented
+with root causes, workarounds and verified status codes.
+
+## Known-broken endpoints — do not treat as regressions
+
+| Endpoint | Behaviour | Use instead |
+|---|---|---|
+| `GET /owners/{ownerId}/pets/{petId}` | always 400 (`B1`) | `GET /pets/{petId}` |
+| `PUT /owners/{ownerId}/pets/{petId}` | 501, unimplemented (`B2`) | `PUT /pets/{petId}` |
+| `POST /pets`, `POST /visits` | 400, FK violation (`B3`) | the nested `/owners/...` routes |
+| `GET /oops` | in the spec, no controller (`B4`) | — |
+
+Also: **a `400` from this API means almost nothing** — a catch-all advice converts every
+exception, including authorization failures and FK violations, into 400 (`XC-01`).
+
+## Working agreements
+
+- **Verify, don't infer.** Run the command or hit the endpoint before reporting a result.
+- **Restore the seed data after mutating**: 10 owners (ids 1–10), 13 pets, 6 pet types,
+  4 visits, 6 vets, 3 specialties. Restarting the backend reseeds the in-memory database.
+- Security is **disabled by default** (`petclinic.security.enable=false`), so the whole API is
+  public. Test authorization with `--petclinic.security.enable=true` on a separate port.

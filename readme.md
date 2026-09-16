@@ -1,213 +1,280 @@
-# React Frontend for Spring Boot PetClinic demo
-[![Build Status](https://travis-ci.org/spring-petclinic/spring-petclinic-reactjs.svg?branch=master)](https://travis-ci.org/spring-petclinic/spring-petclinic-reactjs)
+# Spring PetClinic — REST backend + React frontend
 
-This project is a port of the [Spring (Boot) PetClinic demo](https://github.com/spring-projects/spring-petclinic) with a frontend built using [ReactJS](https://facebook.github.io/react/) and
-[TypeScript](https://www.typescriptlang.org/). 
+A two-part sample application:
 
-I have tried to make as few modifications to the backend code as necessary to the [spring-boot branch](https://github.com/spring-projects/spring-petclinic/tree/springboot) of the original sample project.
-Mainly I've added the new package `org.springframework.samples.petclinic.web.api`
-that contains the REST Api that is used by the React frontend. In this package most of the classes are taken 
-from the [angularjs version](https://github.com/spring-projects/spring-petclinic/tree/angularjs) of the demo.
+- **Backend** — `spring-petclinic-rest` 3.2.1 on Spring Boot 3.2.1. A pure REST API whose
+  controllers implement interfaces generated from `src/main/resources/openapi.yml`.
+- **Frontend** — a single-page React + TypeScript client in `client/`, originally written in
+  2016 as a port of the Spring PetClinic UI.
+
+The two halves come from different upstream projects and are **not fully in sync**. Most of the
+UI works, but a few flows hit endpoints that have changed or are unimplemented. See
+[Known issues](#known-issues).
+
+## Prerequisites
+
+| Tool | Version |
+|---|---|
+| JDK | 17 or newer (built and verified on Corretto 21) |
+| Node.js | 18 or newer (verified on 24) |
+| Maven | not required — use the bundled `mvnw` / `mvnw.cmd` wrapper |
+
+No database server is needed. The default profile uses an in-memory HSQLDB that is created and
+seeded on every start.
+
+## Quick start
+
+Run the two servers in separate terminals. **Start the backend first** — the frontend has no
+data of its own.
+
+### 1. Backend
+
+```bash
+./mvnw -DskipTests package
+java -jar target/spring-petclinic-rest-3.2.1.jar
+```
+
+On Windows use `.\mvnw.cmd` instead of `./mvnw`. You can also run it directly with
+`./mvnw spring-boot:run`.
+
+### 2. Frontend
+
+```bash
+cd client
+npm install
+PORT=4444 npm start
+```
+
+On Windows PowerShell, set the port separately: `$env:PORT=4444; npm start`. The port defaults
+to 3000 if unset.
+
+Then open <http://localhost:4444>.
+
+### Where things listen
+
+| | URL |
+|---|---|
+| Frontend | <http://localhost:4444> |
+| API base | <http://localhost:9966/petclinic/api> |
+| Swagger UI | <http://localhost:9966/petclinic/swagger-ui.html> |
+| OpenAPI JSON | <http://localhost:9966/petclinic/v3/api-docs> |
+| Actuator health | <http://localhost:9966/petclinic/actuator/health> |
+
+The backend port and the `/petclinic/` context path are set in
+`src/main/resources/application.properties`. The frontend reads the backend location from the
+`__API_SERVER_URL__` constant baked in by webpack; override it with the `API_SERVER_URL`
+environment variable at build time.
+
+## Configuration
+
+Two active profiles are selected in `application.properties`: one for the database and one for
+the persistence layer.
+
+```properties
+spring.profiles.active=hsqldb,spring-data-jpa
+```
+
+- Database: `hsqldb` (default), `mysql`, or `postgresql`
+- Persistence: `spring-data-jpa` (default), `jpa`, or `jdbc`
+
+Settings for the other databases live in `application-mysql.properties` and
+`application-postgresql.properties`. For MySQL in Docker:
+
+```bash
+docker run -e MYSQL_ROOT_PASSWORD=petclinic -e MYSQL_DATABASE=petclinic -p 3306:3306 mysql:8.0
+```
+
+### Security
+
+Authentication is **disabled by default**:
+
+```properties
+petclinic.security.enable=false
+```
+
+Every endpoint below is therefore callable without credentials. Enabling it activates the
+`@PreAuthorize` role checks already present on the controllers.
+
+## Project layout
+
+```
+src/main/java/.../rest/controller/   REST controllers (implement generated interfaces)
+src/main/java/.../model/             JPA entities
+src/main/java/.../repository/        Three interchangeable persistence layers
+src/main/java/.../mapper/            MapStruct entity <-> DTO mappers
+src/main/resources/openapi.yml       API contract; DTOs and interfaces generate from this
+client/src/components/               React components, grouped by feature
+client/src/util/index.tsx            fetch helpers and backend URL construction
+client/webpack.config.js             Dev build + dev server
+client/webpack.config.prod.js        Production build
+```
+
+Editing `openapi.yml` regenerates the API interfaces and DTOs on the next build.
+
+## API reference
+
+Base URL: `http://localhost:9966/petclinic/api`. All responses are JSON.
+
+The examples use `curl.exe` and the `--%` token because this repository is commonly used on
+Windows: PowerShell otherwise splits JSON bodies on the spaces inside string values and curl
+treats the fragments as extra URLs. On macOS and Linux, drop `.exe` and `--%` and single-quote
+the JSON instead.
+
+### Owners
+
+```powershell
+curl.exe http://localhost:9966/petclinic/api/owners
+curl.exe "http://localhost:9966/petclinic/api/owners?lastName=Davis"
+curl.exe http://localhost:9966/petclinic/api/owners/1
+curl.exe --% -X POST http://localhost:9966/petclinic/api/owners -H "Content-Type: application/json" -d "{\"firstName\":\"John\",\"lastName\":\"Doe\",\"address\":\"1 Main St\",\"city\":\"Madison\",\"telephone\":\"6085551234\"}"
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/owners/1 -H "Content-Type: application/json" -d "{\"firstName\":\"George\",\"lastName\":\"Franklin\",\"address\":\"110 W. Liberty St.\",\"city\":\"Madison\",\"telephone\":\"6085551023\"}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/owners/11
+```
+
+Listing returns `404` rather than an empty array when nothing matches. Create returns `201`,
+update and delete return `204`.
+
+### Pets belonging to an owner
+
+```powershell
+curl.exe --% -X POST http://localhost:9966/petclinic/api/owners/1/pets -H "Content-Type: application/json" -d "{\"name\":\"Buddy\",\"birthDate\":\"2021-03-04\",\"type\":{\"id\":2,\"name\":\"dog\"}}"
+curl.exe --% -X POST http://localhost:9966/petclinic/api/owners/1/pets/1/visits -H "Content-Type: application/json" -d "{\"date\":\"2024-06-01\",\"description\":\"vaccination\"}"
+```
+
+These are the **working** ways to create pets and visits. The corresponding
+`GET /owners/{ownerId}/pets/{petId}` and `PUT /owners/{ownerId}/pets/{petId}` are broken — see
+[Known issues](#known-issues).
+
+### Pets
+
+```powershell
+curl.exe http://localhost:9966/petclinic/api/pets
+curl.exe http://localhost:9966/petclinic/api/pets/1
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/pets/1 -H "Content-Type: application/json" -d "{\"name\":\"Leo\",\"birthDate\":\"2010-09-07\",\"type\":{\"id\":1,\"name\":\"cat\"}}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/pets/15
+```
+
+### Pet types
+
+```powershell
+curl.exe http://localhost:9966/petclinic/api/pettypes
+curl.exe http://localhost:9966/petclinic/api/pettypes/1
+curl.exe --% -X POST http://localhost:9966/petclinic/api/pettypes -H "Content-Type: application/json" -d "{\"name\":\"turtle\"}"
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/pettypes/6 -H "Content-Type: application/json" -d "{\"name\":\"hamster\"}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/pettypes/7
+```
+
+### Visits
+
+```powershell
+curl.exe http://localhost:9966/petclinic/api/visits
+curl.exe http://localhost:9966/petclinic/api/visits/1
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/visits/1 -H "Content-Type: application/json" -d "{\"date\":\"2013-01-01\",\"description\":\"rabies shot\",\"petId\":7}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/visits/5
+```
+
+### Vets and specialties
+
+```powershell
+curl.exe http://localhost:9966/petclinic/api/vets
+curl.exe http://localhost:9966/petclinic/api/vets/1
+curl.exe --% -X POST http://localhost:9966/petclinic/api/vets -H "Content-Type: application/json" -d "{\"firstName\":\"Anna\",\"lastName\":\"Smith\",\"specialties\":[]}"
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/vets/1 -H "Content-Type: application/json" -d "{\"firstName\":\"James\",\"lastName\":\"Carter\",\"specialties\":[]}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/vets/7
+
+curl.exe http://localhost:9966/petclinic/api/specialties
+curl.exe http://localhost:9966/petclinic/api/specialties/1
+curl.exe --% -X POST http://localhost:9966/petclinic/api/specialties -H "Content-Type: application/json" -d "{\"name\":\"cardiology\"}"
+curl.exe --% -X PUT http://localhost:9966/petclinic/api/specialties/3 -H "Content-Type: application/json" -d "{\"name\":\"dentistry\"}"
+curl.exe -X DELETE http://localhost:9966/petclinic/api/specialties/4
+```
+
+### Users
+
+Admin-only when security is enabled. The server prefixes role names with `ROLE_` in its
+response.
+
+```powershell
+curl.exe --% -X POST http://localhost:9966/petclinic/api/users -H "Content-Type: application/json" -d "{\"username\":\"testuser\",\"password\":\"pass1234\",\"enabled\":true,\"roles\":[{\"name\":\"OWNER_ADMIN\"}]}"
+```
+
+## Tests
+
+```bash
+./mvnw test          # backend
+cd client && npm test # frontend (Jest, 14 tests)
+```
+
+The backend build also enforces JaCoCo coverage thresholds (85% line, 66% branch).
+
+## Known issues
+
+These are real defects confirmed against a running instance, not setup problems. Four are in
+the backend and two in the frontend.
+
+### Backend
+
+**`GET /owners/{ownerId}/pets/{petId}` always returns 400.** The handler compares the pet's
+owner to the requested owner with `equals()`, but `BaseEntity` never overrides it, so this is
+reference identity. Because `spring.jpa.open-in-view=false`, the two lookups run in separate
+JPA sessions and return distinct instances that never match. Use `GET /pets/{petId}` instead.
+
+**`PUT /owners/{ownerId}/pets/{petId}` returns 501.** `updateOwnersPet` is declared in
+`openapi.yml` but never overridden in `OwnerRestController`, so the generated default applies.
+Use `PUT /pets/{petId}` instead.
+
+**`POST /pets` and `POST /visits` fail with a foreign-key violation.** `ownerId` and `petId` are
+marked `readOnly` in the OpenAPI schema, so the generated DTOs discard them from the request
+body and the foreign key is inserted as null. Use the nested routes
+`POST /owners/{ownerId}/pets` and `POST /owners/{ownerId}/pets/{petId}/visits`.
+
+**`GET /oops` is declared in `openapi.yml` with no controller behind it.** It 404s at the
+framework level. Because no handler is matched, the response carries no CORS headers, so the
+browser reports it as a CORS failure rather than a 404.
+
+### Frontend
+
+**Saving an existing owner succeeds but then crashes the page.** `OwnerEditor.onSubmit` treats
+only `200`/`201` as success, while `PUT /owners/{id}` correctly returns `204`. The response
+falls through to the error branch and rendering throws on the missing `fieldErrors`. The data
+*is* saved; reloading shows the change.
+
+**Adding a pet from the UI always fails with 400.** `PetEditor` submits `typeId` as a string,
+but the API requires a nested `type` object (`{"id": 2, "name": "dog"}`). Creating a pet
+through the API directly works.
+
+Two smaller cosmetic problems: the edit-owner screen is titled "New Owner" because the heading
+is hardcoded in `OwnerEditor`, and the `action=` attributes on the forms still point at an old
+`/api/owner` path. They are inert, since every submit handler calls `preventDefault()`.
+
+## Notes on the frontend build
+
+The client is a 2016 React 15 / TypeScript application. Its dependencies were bumped over the
+years without matching updates to the build config, which left it unable to compile at all. The
+build was repaired by moving the webpack configuration to v5 syntax and replacing the obsolete
+toolchain: `ts-loader` in `transpileOnly` mode now handles TypeScript, webpack 5 asset modules
+replace `url-loader`/`file-loader`, and Babel, TSLint and `extract-text-webpack-plugin` are gone.
+
+Type checking is deliberately off. The React 15 type definitions came from the retired
+`typings` registry and can no longer be fetched, so the sources cannot be fully type checked
+without first migrating to `@types` packages. The `postinstall` hook that tried to fetch them
+was removed because it broke every `npm install`.
+
+Keep this in mind when upgrading: a dependency bump that ignores `webpack.config.js` will
+reintroduce exactly the breakage that was just fixed.
 
 ## Related projects
 
-Note there is another Spring PetClinic example that uses React: [spring-petclinic-graphql](https://github.com/spring-petclinic/spring-petclinic-graphql). Beside React that example uses **GraphQL** for API queries instead of the REST API.
+- [spring-petclinic-rest](https://github.com/spring-petclinic/spring-petclinic-rest) — the backend this repository uses
+- [spring-petclinic](https://github.com/spring-projects/spring-petclinic) — the original server-rendered application
+- [spring-petclinic-graphql](https://github.com/spring-petclinic/spring-petclinic-graphql) — a React client using GraphQL instead of REST
 
-## Contribution
+## Contributing
 
-If you like to help and contribute (there's lot root for improvements! I've collected a list of ideas [here: TODO.md](TODO.md)) you're more than welcome! Please open an issue or contact me on [Twitter](https://twitter.com/nilshartmann) so we can discuss together!
+The [issue tracker](https://github.com/spring-projects/spring-petclinic/issues) is the preferred
+channel for bug reports, feature requests and pull requests. Editor preferences are defined in
+[`.editorconfig`](.editorconfig); see <https://editorconfig.org> for plugins.
 
+## License
 
-## Install and run
-
-Note: Spring Boot Server App must be running before starting the client!
-
-To start the server, launch a Terminal and run from the project's root folder (`spring-petclinic`):
-```
-./mvnw spring-boot:run
-```
-
-When the server is running you can try to access the API for example to query all known pet types:
-```
-curl http://localhost:8080/api/pettypes
-```
-
-After starting the server you can install and run the client from the `client` folder:
-
-1. `npm install` (installs the node modules and the TypeScript definition files)
-2. `PORT=4444 npm start` 
-3. Open `http://localhost:4444`
-
-(Why not use the same server for backend and frontend? Because Webpack does a great job for serving JavaScript-based SPAs and I think it's not too uncommon to run this kind of apps using two dedicated server, one for backend, one for frontend)
-
-## Feedback
-
-In case you have any comments, questions, bugs, enhancements feel free to open an issue in this repository.
-If you you want to follow me on twitter, my handle is [@nilshartmann](https://twitter.com/nilshartmann).
- 
-------
- 
-# From the original sample README file:
-
-## Understanding the Spring Petclinic application with a few diagrams
-<a href="https://speakerdeck.com/michaelisvy/spring-petclinic-sample-application">See the presentation here</a>
-
-
-## Running petclinic locally
-```
-	git clone https://github.com/spring-projects/spring-petclinic.git
-	cd spring-petclinic
-	git checkout springboot
-	./mvnw spring-boot:run
-```
-
-You can then access petclinic here: http://localhost:8080/
-
-## In case you find a bug/suggested improvement for Spring Petclinic
-Our issue tracker is available here: https://github.com/spring-projects/spring-petclinic/issues
-
-
-## Database configuration
-
-In its default configuration, Petclinic uses an in-memory database (HSQLDB) which
-gets populated at startup with data. A similar setup is provided for MySql in case a persistent database configuration is needed.
-Note that whenever the database type is changed, the data-access.properties file needs to be updated and the mysql-connector-java artifact from the pom.xml needs to be uncommented.
-
-You may start a MySql database with docker:
-
-```
-docker run -e MYSQL_ROOT_PASSWORD=petclinic -e MYSQL_DATABASE=petclinic -p 3306:3306 mysql:5.7.8
-```
-
-## Working with Petclinic in Eclipse/STS
-
-### prerequisites
-The following items should be installed in your system:
-* Maven 3 (http://www.sonatype.com/books/mvnref-book/reference/installation.html)
-* git command line tool (https://help.github.com/articles/set-up-git)
-* Eclipse with the m2e plugin (m2e is installed by default when using the STS (http://www.springsource.org/sts) distribution of Eclipse)
-
-Note: when m2e is available, there is an m2 icon in Help -> About dialog.
-If m2e is not there, just follow the install process here: http://eclipse.org/m2e/download/
-
-
-### Steps:
-
-1) In the command line
-```
-git clone https://github.com/spring-projects/spring-petclinic.git
-```
-2) Inside Eclipse
-```
-File -> Import -> Maven -> Existing Maven project
-```
-
-
-## Looking for something in particular?
-
-<table>
-  <tr>
-    <th width="300px">Spring Boot Configuration</th><th width="300px"></th>
-  </tr>
-  <tr>
-    <td>The Main Class</td>
-    <td><a href="/src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java">PetClinicApplication.java</a></td>
-  </tr>
-  <tr>
-    <td>Properties Files</td>
-    <td>
-      <a href="/src/main/resources/application.properties">application.properties</a>
-    </td>
-  </tr>
-  <tr>
-    <td>Caching</td>
-    <td>Use of EhCache <a href="/src/main/java/org/springframework/samples/petclinic/config/CacheConfig.java">CacheConfig.java</a> <a href="/src/main/resources/ehcache.xml">ehcache.xml</a></td>
-  </tr>
-  <tr>
-    <td>Dandelion</td>
-    <td>DatatablesFilter, DandelionFilter and DandelionServlet registration <a href="/src/main/java/org/springframework/samples/petclinic/config/DandelionConfig.java">DandelionConfig.java</a></td>
-  </tr>
-  <tr>
-    <td>Spring MVC - XML integration</td>
-    <td><a href="/src/main/java/org/springframework/samples/petclinic/config/CustomViewsConfiguration.java">CustomViewsConfiguration.java</a></td>
-  </tr>
-</table>
-
-
-<table>
-  <tr>
-    <th width="300px">Others</th><th width="300px">Files</th>
-  </tr>
- <tr>
-    <td>JSP custom tags</td>
-    <td>
-      <a href="/src/main/webapp/WEB-INF/tags">WEB-INF/tags</a>
-      <a href="/src/main/webapp/WEB-INF/jsp/owners/createOrUpdateOwnerForm.jsp">createOrUpdateOwnerForm.jsp</a></td>
-  </tr>
-  <tr>
-    <td>Bower</td>
-    <td>
-      <a href="/pom.xml">bower-install maven profile declaration inside pom.xml</a> <br />
-      <a href="/bower.json">JavaScript libraries are defined by the manifest file bower.json</a> <br />
-      <a href="/.bowerrc">Bower configuration using JSON</a> <br />
-      <a href="/src/main/resources/spring/mvc-core-config.xml#L30">Resource mapping in Spring configuration</a> <br />
-      <a href="/src/main/webapp/WEB-INF/jsp/fragments/staticFiles.jsp#L12">sample usage in JSP</a></td>
-    </td>
-  </tr>
-  <tr>
-    <td>Dandelion-datatables</td>
-    <td>
-      <a href="/src/main/webapp/WEB-INF/jsp/owners/ownersList.jsp">ownersList.jsp</a>
-      <a href="/src/main/webapp/WEB-INF/jsp/vets/vetList.jsp">vetList.jsp</a>
-      <a href="/src/main/webapp/WEB-INF/web.xml">web.xml</a>
-      <a href="/src/main/resources/dandelion/datatables/datatables.properties">datatables.properties</a>
-   </td>
-  </tr>
-</table>
-
-
-## Interaction with other open source projects
-
-One of the best parts about working on the Spring Petclinic application is that we have the opportunity to work in direct contact with many Open Source projects. We found some bugs/suggested improvements on various topics such as Spring, Spring Data, Bean Validation and even Eclipse! In many cases, they've been fixed/implemented in just a few days.
-Here is a list of them:
-
-<table>
-  <tr>
-    <th width="300px">Name</th>
-    <th width="300px"> Issue </th>
-  </tr>
-
-  <tr>
-    <td>Spring JDBC: simplify usage of NamedParameterJdbcTemplate</td>
-    <td> <a href="https://jira.springsource.org/browse/SPR-10256"> SPR-10256</a> and <a href="https://jira.springsource.org/browse/SPR-10257"> SPR-10257</a> </td>
-  </tr>
-  <tr>
-    <td>Bean Validation / Hibernate Validator: simplify Maven dependencies and backward compatibility</td>
-    <td>
-      <a href="https://hibernate.atlassian.net/browse/HV-790"> HV-790</a> and <a href="https://hibernate.atlassian.net/browse/HV-792"> HV-792</a>
-      </td>
-  </tr>
-  <tr>
-    <td>Spring Data: provide more flexibility when working with JPQL queries</td>
-    <td>
-      <a href="https://jira.springsource.org/browse/DATAJPA-292"> DATAJPA-292</a>
-      </td>
-  </tr>  
-  <tr>
-    <td>Eclipse: validation bug when working with .tag/.tagx files (has only been fixed for Eclipse 4.3 (Kepler)). <a href="https://github.com/spring-projects/spring-petclinic/issues/14">See here for more details.</a></td>
-    <td>
-      <a href="https://issuetracker.springsource.com/browse/STS-3294"> STS-3294</a>
-    </td>
-  </tr>    
-</table>
-
-
-# Contributing
-
-The [issue tracker](https://github.com/spring-projects/spring-petclinic/issues) is the preferred channel for bug reports, features requests and submitting pull requests.
-
-For pull requests, editor preferences are available in the [editor config](https://github.com/spring-projects/spring-petclinic/blob/master/.editorconfig) for easy use in common text editors. Read more and download plugins at <http://editorconfig.org>.
-
-
-
-
+Apache License 2.0 — see [LICENSE.txt](LICENSE.txt).

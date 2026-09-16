@@ -1,0 +1,40 @@
+---
+description: Client build config — a fragile webpack 5 migration that dependency bumps can break
+globs: client/webpack.config*.js,client/package.json,client/tsconfig.json
+alwaysApply: false
+---
+
+# Frontend build
+
+The client is a 2016 React 15 + TypeScript app whose build was migrated to webpack 5. Before
+that migration it **could not compile at all**: Dependabot had bumped dependencies for years
+while `webpack.config.js` stayed in webpack 1 syntax.
+
+> **The single most important rule: a dependency bump that ignores `webpack.config.js` will
+> reintroduce that breakage.** Always run `npm run build:prod` after changing dependencies.
+
+## Current toolchain — do not regress it
+
+| Concern | Current | Do not reintroduce |
+|---|---|---|
+| TypeScript | `ts-loader` in `transpileOnly` mode | `babel-loader` (needs Babel 7; only Babel 6 existed) |
+| Assets | webpack 5 asset modules | `url-loader`, `file-loader` |
+| CSS | `style-loader` 4 + `css-loader` 6 + `less-loader` 12 | `extract-text-webpack-plugin` (webpack 3 only) |
+| Dev server | `webpack-dev-server` 5 via `webpack serve` | `client/server.js` (dead, webpack-dev-server 1 era) |
+| Types | none — see below | the `typings` package (registry is dead) |
+
+`client/server.js` and `client/.babelrc` remain in the tree but are **unused**.
+
+## Rules
+
+1. **`transpileOnly: true` is deliberate.** React 15 type definitions came from the retired
+   `typings` registry, so the sources cannot be type checked. Do not enable type checking
+   without first migrating to `@types` packages — it will fail on every file.
+2. Never re-add a `postinstall` hook that fetches types. The old `typings install` hook broke
+   every `npm install`.
+3. `npm install` must resolve **with no flags**. If you need `--legacy-peer-deps`, a dependency
+   is mismatched — fix the dependency instead.
+4. `historyApiFallback: true` is required in `devServer`; React Router uses real paths.
+5. The backend URL is compiled in via `DefinePlugin` as `__API_SERVER_URL__`, overridable with
+   the `API_SERVER_URL` env var. Keep dev and prod configs pointing at the same default.
+6. Verify with all three: `npm run build:prod`, `npm test` (14 tests), and `npm start`.

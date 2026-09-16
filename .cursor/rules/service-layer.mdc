@@ -1,0 +1,48 @@
+---
+description: Service layer conventions — transaction boundary and absence handling
+globs: src/main/java/**/service/**/*.java
+alwaysApply: false
+---
+
+# Service layer
+
+`ClinicServiceImpl` is a flat facade over all six domain repositories. It holds almost no
+business logic; its real job is to be the **transaction boundary**.
+
+## Rules
+
+1. Annotate every method: `@Transactional(readOnly = true)` for reads, `@Transactional` for
+   writes. This is the only place transactions are declared.
+2. **Return `null` for "not found", never throw.** Controllers rely on this to emit 404. Follow
+   the existing shape exactly, because the three DAO profiles disagree about absence:
+
+   ```java
+   @Override
+   @Transactional(readOnly = true)
+   public Owner findOwnerById(int id) throws DataAccessException {
+       Owner owner = null;
+       try {
+           owner = ownerRepository.findById(id);
+       } catch (ObjectRetrievalFailureException | EmptyResultDataAccessException e) {
+           return null;   // normalise Spring Data vs JPA/JDBC behaviour
+       }
+       return owner;
+   }
+   ```
+
+3. **Two service calls are two persistence contexts.** Entities returned by separate calls are
+   distinct instances. Never compare them with `equals()` — `BaseEntity` does not override it,
+   so the comparison is reference identity. This is the cause of defect `B1`:
+
+   ```java
+   // ❌ BAD — always false across two service calls
+   if (!pet.getOwner().equals(owner)) { ... }
+
+   // ✅ GOOD — compare ids
+   if (!pet.getOwner().getId().equals(owner.getId())) { ... }
+   ```
+
+4. Keep new logic thin here. Validation belongs in the DTO/Bean Validation layer; persistence
+   detail belongs in the repository.
+5. `UserServiceImpl.saveUser` currently stores passwords **unencoded**. Do not copy that
+   pattern; see `AUTH-03` before touching credentials.

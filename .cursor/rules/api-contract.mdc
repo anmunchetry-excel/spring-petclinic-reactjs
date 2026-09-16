@@ -1,0 +1,48 @@
+---
+description: REST API is contract-first — openapi.yml generates the interfaces and DTOs
+globs: src/main/resources/openapi.yml,src/main/java/**/rest/**/*.java,src/main/java/**/mapper/**/*.java
+alwaysApply: false
+---
+
+# API layer: the OpenAPI spec is the source of truth
+
+`src/main/resources/openapi.yml` generates, at build time, into
+`target/generated-sources/openapi`:
+
+- API interfaces in `rest.api` (`OwnersApi`, `PetsApi`, …), `interfaceOnly=true`
+- DTOs in `rest.dto` with a `Dto` suffix and Bean Validation annotations
+
+Controllers implement those interfaces. **Never edit generated sources** — change the spec and
+rebuild.
+
+## Rules
+
+1. **New endpoint = edit `openapi.yml` first**, then implement the generated interface method.
+   A controller that does not override an operation still compiles and silently returns
+   **501** at runtime. That is how defect `B2` (`PUT /owners/{ownerId}/pets/{petId}`) happened.
+2. **`readOnly: true` fields are dropped from request bodies.** `ownerId` on `Pet` and `petId`
+   on `Visit` are read-only, so `POST /pets` and `POST /visits` insert a null FK and fail with
+   400 (`B3`). Use the nested routes, or change the spec — do not "fix" it in the mapper.
+3. Follow the existing status conventions:
+
+   | Action | Status |
+   |---|---|
+   | create | `201` + `Location` header |
+   | update | `204` |
+   | delete | `204` |
+   | not found | `404` |
+   | list with no matches | `404` (not an empty array) — `XC-02` |
+
+   One endpoint already deviates: `POST /pets` returns `200`, sets no `Location`, and echoes
+   the request DTO instead of the persisted entity (`PET-08`). Do not copy it. Note the three
+   frontend editors each assume a different success code — see `frontend-api.mdc`.
+
+4. Keep the two DTO shapes distinct: `XFields` for request bodies, `X` for full resources with
+   server-assigned ids and nested collections.
+5. Mappers are MapStruct interfaces in `mapper/`, `defaultComponentModel=spring`. Declare
+   explicit `@Mapping` only for flattening, e.g. `@Mapping(source = "owner.id", target = "ownerId")`.
+6. Controllers stay thin: map DTO → entity, call `ClinicService`, translate the result to a
+   status code. No business logic or persistence access.
+7. Every controller carries `@CrossOrigin(exposedHeaders = "errors, content-type")`. Keep the
+   `errors` header exposed — Bean Validation failures are returned in it, and the frontend
+   reads it.
