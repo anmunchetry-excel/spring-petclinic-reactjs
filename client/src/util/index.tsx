@@ -3,7 +3,9 @@ import { IHttpMethod } from '../types';
 declare var __API_SERVER_URL__;
 const BACKEND_URL = (typeof __API_SERVER_URL__ === 'undefined' ? 'http://localhost:9966/petclinic' : __API_SERVER_URL__);
 
-export const url = (path: string): string => `${BACKEND_URL}/${path}`;
+// Callers pass paths both with and without a leading slash. The backend rejects
+// the resulting double slash with a 400, so normalise to exactly one.
+export const url = (path: string): string => `${BACKEND_URL}/${path.replace(/^\/+/, '')}`;
 
 /**
  * path: relative PATH without host and port (i.e. '/api/123')

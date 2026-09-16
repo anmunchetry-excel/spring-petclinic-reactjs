@@ -10,7 +10,11 @@ const fetchMock: any = fetch;
 describe('util', () => {
   describe('url', () => {
     it('returns url with full path', () => {
-      expect(url('xxx')).toBe('http://localhost:8080/xxx');
+      expect(url('xxx')).toBe('http://localhost:9966/petclinic/xxx');
+    });
+
+    it('collapses a leading slash so the backend does not see a double slash', () => {
+      expect(url('/xxx')).toBe('http://localhost:9966/petclinic/xxx');
     });
   });
 
@@ -22,7 +26,7 @@ describe('util', () => {
       return submitForm('POST', '/some-enzyme', { name: 'Test' }, (status, response) => {
         // make sure request data is passed to fetch as expected 
         expect(fetchMock.mock.calls.length).toBe(1);
-        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8080//some-enzyme');
+        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:9966/petclinic/some-enzyme');
         expect(fetchMock.mock.calls[0][1].method).toBe('POST');
         expect(fetchMock.mock.calls[0][1].body).toEqual(JSON.stringify({ name: 'Test' }));
 
