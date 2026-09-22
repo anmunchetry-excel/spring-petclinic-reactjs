@@ -1,7 +1,10 @@
-Date created: 2026-09-16
-Date last modified: 2026-09-16
-
 # Vets & Specialties - Baseline Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | September 16, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Baseline documentation of vets and specialties |
 
 > **This is a baseline PRD.** It documents the vets vertical slice **as it exists today**,
 > verified against a running instance. Current-behaviour sections are evidence-based; future
@@ -9,7 +12,13 @@ Date last modified: 2026-09-16
 >
 > Companion documents: [ARCHITECTURE.md](./ARCHITECTURE.md),
 > [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md),
-> [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+> [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md),
+> [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md),
+> [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md).
+>
+> **This slice also owns** specialty delete-refusal semantics (`VET-03` / `VET-04`), specialty
+> string-concat queries, and the duplicate `findVets` / `findAllVets` dead code (`VET-08`).
+> Contrast with destructive pet-type delete: [PETS](./PETS_BASELINE_PRD.md) `PET-05`.
 
 ---
 
@@ -35,6 +44,62 @@ safety characteristics, no apparent reason.
 
 Finally, the UI is read-only. There is no way to add, edit or delete a vet or a specialty
 through the application, despite full CRUD existing on the API.
+
+---
+
+## Business Requirements
+
+This slice exists so the clinic can **keep a staff directory**: who the veterinarians are and
+which specialties they hold. It is independent of the owner → pet → visit chain. The directory
+does not currently record which vet delivered a visit.
+
+### Veterinarian Directory
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Any clinic staff | Looks up who works here | Browse veterinarians and their specialties |
+| Vet administrator | Maintains the directory | Add, correct or remove vets without silently dropping specialties |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-VET-01 | Let staff browse a list of veterinarians with their specialties | **Met** — `/vets` is read-only and renders correctly |
+| BR-VET-02 | Let an administrator add or update a veterinarian, including the specialties they hold | **Partial** — API CRUD works; there is no write UI (`VET-05`). Unknown specialty names are dropped while the create still succeeds (`VET-01`) |
+| BR-VET-05 | Reject a request that names a specialty the catalogue does not have, rather than creating the vet with none | **Not met** — unknown names are silently dropped (`VET-01`) |
+
+#### Business rules
+
+1. **A veterinarian may hold zero or more specialties.** "None" is a valid directory state
+   (seed: James Carter).
+2. **Updating a vet replaces the entire specialty set** (`VET-06`). Partial add/remove is not a
+   current business operation.
+3. **Visits are not attributed to a veterinarian.** Connecting the directory to clinical history
+   is a future product decision, not a missing baseline repair.
+
+### Specialty Catalogue
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Vet administrator | Maintains the catalogue | Add or remove specialties without destroying the directory |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-VET-03 | Let an administrator maintain the specialty catalogue | **Partial** — API CRUD works; no UI |
+| BR-VET-04 | Refuse to delete a specialty that is still assigned to a veterinarian | **Met** — in-use delete is refused (by flush ordering, not an explicit check) (`VET-03`) |
+
+#### Business rules
+
+1. **Specialties are a shared catalogue**, matched by name. Submitting an unknown name is an
+   error, not an invitation to create the vet without specialties.
+2. **Deleting a specialty in use must be refused.** Lookup rows must not destroy the directory
+   the way pet-type delete destroys pets.
 
 ---
 
@@ -65,8 +130,10 @@ pet or visit slices.
 - **Associating vets with visits.** No such relationship exists; creating one is a feature, not
   a baseline gap. Noted as an observation only.
 - **Pet types**, the other lookup table — [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md).
-  Referenced here only for the safety contrast.
-- **Cross-cutting concerns** — [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+  Referenced here for the safety contrast (`PET-05` destroys; specialties refuse).
+- **API-wide error advice / migrations / CORS** —
+  [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md). Empty-list convention:
+  [OWNERS](./OWNERS_BASELINE_PRD.md) `OWN-01`.
 
 ### Cut
 
@@ -151,10 +218,11 @@ public void delete(Specialty specialty) {
 ```
 
 Two observations. It uses **string concatenation** rather than bound parameters — the same
-pattern found in **all four** override classes (`XC-06`), and here it is `createNativeQuery`,
-which is not even JPQL-parsed, so the risk is higher.
+pattern found in **all four** delete-override classes (Pets owns pet/pet-type; Visits owns
+visit delete; this slice owns specialty). Here the specialty override uses `createNativeQuery`,
+which is not even JPQL-parsed, so the risk is higher (`VET-03`).
 And the ordering is ineffective: `em.remove` is queued before the join-table cleanup, so the
-flush attempts the specialty delete first and the foreign key rejects it (`VET-03`). The net
+flush attempts the specialty delete first and the foreign key rejects it. The net
 effect is safe — deletion is refused — but by accident rather than design.
 
 ### Service layer
@@ -280,7 +348,7 @@ against a running server; record gaps.
 
 **Tasks**:
 1. Return `409 Conflict` with a clear message when a specialty is in use, instead of a `400`
-   leaking the constraint name (`VET-04`). Depends on the cross-cutting error-handling decision.
+   leaking the constraint name (`VET-04`). Depends on Authentication's catch-all fix (`AUTH-01`).
 2. Make the refusal deliberate rather than incidental — check for references explicitly instead
    of relying on flush ordering (`VET-03`).
 3. Parameterise the concatenated queries in `SpringDataSpecialtyRepositoryImpl` (`VET-03`).
@@ -370,7 +438,7 @@ Sending `"specialties": []` is valid and creates a vet with none.
 - [ ] Repository queries use bound parameters (`VET-03`)
 - [ ] Vets and specialties can be managed from the UI (`VET-05`)
 - [ ] Individual specialties can be added or removed without replacing the set (`VET-06`)
-- [ ] `GET /vets` with no rows returns `200` and an empty array (cross-cutting)
+- [ ] `GET /vets` with no rows returns `200` and an empty array (coordinate with `OWN-01`)
 
 ### Identified gaps
 
@@ -492,7 +560,9 @@ exactly.
 
 ## Notes for AI Agents
 
-1. This is a **baseline** document. Current-behaviour sections are verified fact.
+1. This is a **baseline** document. Current-behaviour sections are verified fact. Read
+   Business Requirements before changing directory behaviour; a successful create must not
+   silently drop specialties the administrator submitted.
 2. Do not implement Phase 1+ work without explicit approval.
 3. **Specialties resolve by name, not id.** When creating a vet, send the exact existing name,
    and verify the response body — an unknown name yields an empty list with a 201.
@@ -508,8 +578,13 @@ exactly.
 
 ## Current Status
 
-**Last Updated**: 2026-09-16
+**Last Updated**: 2026-09-22
 **Current Phase**: Phase 0 - Baseline documentation
 **Status**: COMPLETED
 **Next Steps**: Review. This is the least broken slice; `VET-01` is the most valuable fix
 because it silently discards submitted data while reporting success.
+
+**Change log**:
+- 2026-09-22 — added Business Requirements (BR-VET-01–05).
+- 2026-09-22 — absorbed former cross-cutting specialty delete/concat and dead-code notes into
+  `VET-03` / `VET-04` / `VET-08`; removed `CROSS_CUTTING_BASELINE_PRD.md` dependency.

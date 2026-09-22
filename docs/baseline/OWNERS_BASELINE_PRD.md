@@ -1,7 +1,10 @@
-Date created: 2026-09-16
-Date last modified: 2026-09-16
-
 # Owners - Baseline Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | September 16, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Baseline documentation of the owners vertical slice |
 
 > **This is a baseline PRD.** It documents the owners vertical slice **as it exists today**,
 > verified against a running instance. Sections describing current behaviour are evidence-based;
@@ -9,7 +12,13 @@ Date last modified: 2026-09-16
 >
 > Companion documents: [ARCHITECTURE.md](./ARCHITECTURE.md),
 > [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md),
+> [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md),
+> [VISITS_BASELINE_PRD.md](./VISITS_BASELINE_PRD.md),
+> [VETS_BASELINE_PRD.md](./VETS_BASELINE_PRD.md),
 > [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md).
+>
+> **This slice also owns** the empty-list → 404 convention (`OWN-01`, present in all six list
+> controllers) and the OwnerEditor half of create/update status-code mismatches (`OWN-04`).
 
 ---
 
@@ -31,6 +40,78 @@ Underneath that sit quieter issues: two validation layers disagree about the tel
 some input passes DTO validation and then fails at persist time with a raw exception leaked to
 the client; deleting an owner silently cascades to their pets and visits with no warning; and
 the list endpoint returns `404` rather than an empty array when nothing matches.
+
+---
+
+## Business Requirements
+
+This slice exists so clinic staff can **keep a file on each pet owner** and reach that owner's
+pets and visits from it. The owner is the clinic's client, not an application login.
+
+### Find & View Owners
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception staff | Front desk | Find an owner by last name and open the file |
+| Clinic administrator | `OWNER_ADMIN` when security is on | Same capabilities across every owner — no per-record ownership |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-OWN-01 | Let staff find owners by last name and open a file that shows contact details, pets and visits | **Met** — search, list and detail work |
+| BR-OWN-04 | Tell staff clearly when a search matches nobody, without implying the resource is missing | **Not met** — empty list returns 404 (`OWN-01`) |
+
+#### Business rules
+
+1. **An owner is the aggregate root.** Pets belong to owners; visits are reached through the
+   owner file. Staff navigate pet and visit screens from the owner, not from a global pet list.
+2. **Last-name search is a prefix match**, case-insensitive.
+3. **Any `OWNER_ADMIN` may edit any owner.** Record-level ownership is out of scope (`OWN-10`).
+
+### Register & Edit Owners
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception staff | Front desk | Register a new client; correct contact details |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-OWN-02 | Let staff register a new owner with name, address, city and telephone | **Met** — create works end to end in the UI |
+| BR-OWN-03 | Let staff correct an existing owner's contact details and stay on a working screen afterwards | **Partial** — the save succeeds, then the page crashes (`OWN-04`) |
+| BR-OWN-05 | Reject a telephone number the clinic cannot dial, with a field-level message | **Partial** — client and DTO rules disagree with the entity; 11–20 digits leak a raw exception (`OWN-09`) |
+
+#### Business rules
+
+1. **Contact fields are mandatory:** first name, last name, address, city, telephone.
+2. **Telephone is digits only**, at most 10 digits at the entity layer (the DTO currently allows
+   20 — that disagreement is a defect, not two valid rules).
+
+### Owner Deletion
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Clinic administrator | Maintains records | Must not destroy pets/visits without an explicit confirmation flow |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-OWN-06 | Not offer owner deletion in the UI until staff can confirm that pets and visits will go with it | **Met as a cut** — delete exists on the API and cascades (`OWN-07`); it is deliberately hidden |
+
+#### Business rules
+
+1. **Deleting an owner deletes their pets and those pets' visits.** That is current cascade
+   behaviour. Exposing it in the UI requires an explicit confirmation the product does not have
+   yet.
 
 ---
 
@@ -61,23 +142,22 @@ The owners vertical slice, end to end:
 ### Out of Scope
 
 - **Authentication and authorization mechanics** — owned by
-  [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md). Only the
+  [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md), including the catch-all
+  exception advice (`AUTH-01` / `AUTH-02`) and migration framework (`AUTH-14`). Only the
   `@PreAuthorize("hasRole(@roles.OWNER_ADMIN)")` annotations on this controller are noted here.
 - **The pets and visits slices themselves.** The owner-scoped endpoints that *create* pets and
   visits are in scope because they live on `OwnerRestController`; the pet and visit domain
-  behaviour is not.
-- **The catch-all exception advice.** It affects every slice and needs a cross-cutting decision.
+  behaviour is not. PetEditor / VisitsPage status mismatches are owned by those PRDs.
 - **Frontend build tooling** — recorded in `BASELINE_UPDATES_FOR_MODERNIZATION.md`.
 
 ### Cut
 
-- **Fixing `F1` (the edit-owner crash) as part of this document.** Cut because the baseline must
+- **Fixing `OWN-04` (the edit-owner crash) as part of this document.** Cut because the baseline must
   record the starting point first; it is Phase 1 task 1 and needs approval.
-- **Redesigning the list endpoint to return an empty array instead of 404.** Considered, but it
-  is a breaking API change affecting every list endpoint in the system, so it belongs in a
-  cross-cutting API PRD rather than here.
 - **Adding owner deletion to the UI.** Considered and cut: deletion cascades silently to pets and
   visits, so exposing it needs a confirmation design that does not exist yet (`OWN-07`).
+  Empty-list → empty array (`OWN-01`) stays in this PRD's Phase 4; when changing it, update the
+  same guard in Pets, PetTypes, Visits, Vets and Specialties controllers in the same release.
 
 ---
 
@@ -194,6 +274,14 @@ Optional `lastName` query parameter. Returns the full owner list, or the filtere
 **Response:**
 - Success (200): array of owners, each with a nested `pets` array
 - Error (404): **no owners matched** — not an empty array (`OWN-01`)
+
+> **`OWN-01` is API-wide.** The identical `isEmpty()` → `NOT_FOUND` guard is present in
+> `OwnerRestController`, `PetRestController`, `PetTypeRestController`, `SpecialtyRestController`,
+> `VetRestController` and `VisitRestController`. Verified: `GET /owners?lastName=Zzz` → **404**.
+> This slice owns the convention change; Pets / Visits / Vets must update their controllers in
+> the same release. A successful query with no matches is not a missing resource — clients must
+> treat list-404 as "no matches" today. `FindOwnersPage` currently renders an empty table rather
+> than a "no results" message because of it.
 
 #### GET /api/owners/{ownerId}
 
@@ -356,8 +444,8 @@ if the fetch fails (`OWN-12`).
 1. Decide the real telephone rule and align `openapi.yml` with `Owner` (`OWN-09`).
 2. Decide whether entity-level Bean Validation is kept at all, or whether the DTO is the single
    gate.
-3. Ensure any persist-time violation is translated, not leaked — depends on the cross-cutting
-   error-handling decision.
+3. Ensure any persist-time violation is translated, not leaked — depends on
+   [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md) catch-all fix (`AUTH-01`).
 
 ### Phase 3: Repair the owner-scoped pet endpoints - PLANNED
 
@@ -375,9 +463,13 @@ if the fetch fails (`OWN-12`).
 **Objective**: Make the list endpoint conventional and bounded.
 
 **Tasks**:
-1. Return `200` with an empty array instead of `404` (`OWN-01`) — breaking, cross-cutting.
-2. Add pagination and sorting (`OWN-08`); the list is currently unbounded.
-3. Consider search beyond `lastName` (`OWN-13`).
+1. Return `200` with an empty array instead of `404` (`OWN-01`) — **breaking**. Apply the same
+   change to all six list controllers in one release; update client empty-state handling.
+2. Document create/update status conventions for editors: creates → `201`, updates → `204`.
+   `OwnerEditor` must accept `204` (`OWN-04`); see also `PET-11` and `VIS-02` for the other two
+   wrong assumptions about the same convention.
+3. Add pagination and sorting (`OWN-08`); the list is currently unbounded.
+4. Consider search beyond `lastName` (`OWN-13`).
 
 ### Phase 5: Deletion and ownership - PLANNED
 
@@ -490,10 +582,10 @@ Measured against the running instance on port 9966.
 
 | ID | Gap | Evidence | Severity |
 |---|---|---|---|
-| `OWN-01` | List returns 404 instead of an empty array | `?lastName=Zzz` → 404 | Medium |
+| `OWN-01` | List returns 404 instead of an empty array (same guard in all six list controllers) | `?lastName=Zzz` → 404 | Medium |
 | `OWN-02` | `GET /owners/{ownerId}/pets/{petId}` always 400 | global `B1`; `equals()` on `BaseEntity` | High |
 | `OWN-03` | `PUT /owners/{ownerId}/pets/{petId}` returns 501 | global `B2`; not overridden | High |
-| `OWN-04` | Edit-owner save succeeds then crashes the page | global `F1`; `204` not treated as success | High |
+| `OWN-04` | Edit-owner save succeeds then crashes the page (expects 200/201; update returns 204) | global `F1` | High |
 | `OWN-05` | Edit screen titled "New Owner" | hardcoded `<h2>` in `OwnerEditor` | Low |
 | `OWN-06` | Owner rows use `<a href>`, forcing a full page reload | `OwnersTable.tsx` | Low |
 | `OWN-07` | Owner deletion cascades silently to pets and visits | verified: pet 404 after owner delete | Medium |
@@ -545,8 +637,8 @@ Measured against the running instance on port 9966.
 
 - **Risk**: Changing the list endpoint from 404 to an empty array (`OWN-01`) breaks every
   existing client, including `FindOwnersPage`.
-  **Mitigation**: Treat it as a cross-cutting API change. Update the client in the same release,
-  and do it for all list endpoints at once rather than owners alone.
+  **Mitigation**: Single coordinated release — update all six list controllers and
+  `FindOwnersPage` empty-state handling together (this PRD owns the convention).
 
 - **Risk**: Owner deletion cascades to pets and visits. A bulk cleanup or an accidental call
   destroys more than intended, and nothing warns the caller.
@@ -619,7 +711,9 @@ cascades in turn. Verified: the pet returned 404 after the owner was deleted.
 ## Notes for AI Agents
 
 1. This is a **baseline** document. Current-behaviour sections are verified fact — do not
-   "correct" them to match what the code appears to intend.
+   "correct" them to match what the code appears to intend. Read Business Requirements before
+   changing owner lifecycle behaviour; do not weaken a Met capability while remediating a
+   Not-met one.
 2. Do not implement Phase 1+ work without explicit approval. Phase 0 is the only completed phase.
 3. Owner-scoped **pet** endpoints live on `OwnerRestController` but belong to both slices.
    Coordinate with the pets baseline PRD before changing them.
@@ -633,14 +727,20 @@ cascades in turn. Verified: the pet returned 404 after the owner was deleted.
 
 ## Current Status
 
-**Last Updated**: 2026-09-16
+**Last Updated**: 2026-09-22
 **Current Phase**: Phase 0 - Baseline documentation
 **Status**: COMPLETED
 **Next Steps**: Review, then proceed to the Pets baseline PRD — it shares the owner-scoped pet
 endpoints documented here. Remediation phases require approval before any code change.
 
+**Change log**:
+- 2026-09-22 — added Business Requirements (BR-OWN-01–06).
+- 2026-09-22 — absorbed former cross-cutting list-404 and editor status-convention ownership
+  (`OWN-01`, `OWN-04`); catch-all advice / migrations remain under Authentication.
+
 **Cross-slice items surfaced here**:
 
-1. List endpoints returning `404` instead of an empty array (`OWN-01`) — affects every slice.
-2. The catch-all exception advice leaking internal types (`OWN-09` symptom) — affects every slice.
+1. List endpoints returning `404` instead of an empty array (`OWN-01`) — this PRD owns the
+   convention; apply to all six list controllers together.
+2. Persist-time validation leaks (`OWN-09`) — symptom of `AUTH-01` / `AUTH-02`.
 3. No migration framework (`AUTH-14`) — blocks any `owners` column change.

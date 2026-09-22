@@ -1,7 +1,10 @@
-Date created: 2026-09-16
-Date last modified: 2026-09-16
-
 # Pets & Pet Types - Baseline Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | September 16, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Baseline documentation of pets and pet types |
 
 > **This is a baseline PRD.** It documents the pets vertical slice **as it exists today**,
 > verified against a running instance. Current-behaviour sections are evidence-based; future
@@ -9,7 +12,14 @@ Date last modified: 2026-09-16
 >
 > Companion documents: [ARCHITECTURE.md](./ARCHITECTURE.md),
 > [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md),
-> [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+> [VISITS_BASELINE_PRD.md](./VISITS_BASELINE_PRD.md),
+> [VETS_BASELINE_PRD.md](./VETS_BASELINE_PRD.md),
+> [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md),
+> [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md).
+>
+> **This slice also owns** destructive pet-type deletion (`PET-05`), string-concat JPQL in pet /
+> pet-type delete overrides (`PET-06`), and create-response / PetEditor status mismatches
+> (`PET-08`, `PET-11`). Specialty delete contrast is documented under Vets.
 
 ---
 
@@ -29,6 +39,62 @@ interface at all**, and only the owner-scoped creation endpoint works from the A
 Pet types are a small lookup table, but they carry the single most dangerous behaviour found
 anywhere in this codebase: **deleting a pet type silently deletes every pet of that type, along
 with all their visits**, and returns `204` as though nothing unusual happened.
+
+---
+
+## Business Requirements
+
+This slice exists so the clinic can **register each animal against its owner** and classify it
+by type (cat, dog, and so on). Pets sit between owners (above) and visits (below): without a
+working pet lifecycle, clinical history cannot be attached.
+
+### Pet Records
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception staff | Front desk | Add a pet to an owner's file; correct name, birth date or type |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-PET-01 | Let staff add a pet to an owner (name, birth date, type) from the owner's file | **Not met** — UI sends `typeId`; API requires a nested `type` (`PET-02`) |
+| BR-PET-02 | Let staff open and update an existing pet from the owner's file | **Not met** — load returns 400, save returns 501 (`PET-03`, `PET-04`) |
+| BR-PET-03 | Show each pet on the owner file with name, birth date, type and visits | **Met** — `PetsTable` is read-only and working |
+| BR-PET-06 | Not offer pet deletion in the UI | **Met as a cut** — API delete exists; the UI has no control (`PET-12`) |
+
+#### Business rules
+
+1. **A pet belongs to exactly one owner and exactly one type.** Both are mandatory. A pet cannot
+   exist without an owner.
+2. **A pet cannot be moved to another owner** through the current update path (`PET-09`).
+   Reassignment would be a new business rule, not a baseline gap to "restore".
+3. **Deleting a pet deletes its visits.** That cascade is expected.
+
+### Pet Types
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Vet administrator | Maintains the type catalogue | Add or rename types **without destroying animals already of that type** |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-PET-04 | Keep a catalogue of pet types that staff can list when registering a pet | **Met** — `GET /pettypes` feeds the dropdown |
+| BR-PET-05 | Refuse to delete a pet type that still has pets, rather than deleting those pets and their visits | **Not met** — delete returns 204 after destroying dependents (`PET-05`) |
+
+#### Business rules
+
+1. **Deleting a pet type must not delete pets.** Lookup tables are classifications, not owners
+   of clinical records. Today's opposite behaviour is the most serious business defect in the
+   product (`PET-05`).
+2. **Pet types are a shared catalogue**, not per-owner. Changing a type name affects every pet
+   classified that way.
 
 ---
 
@@ -59,10 +125,12 @@ remove the largest accidental-data-loss risk in the system.
 
 - **Owners** — [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md). The owner-scoped endpoints
   `POST/GET/PUT /owners/{ownerId}/pets/...` are documented there; their *pet* semantics are
-  analysed here because they are the only working creation path.
+  analysed here because they are the only working creation path. Empty-list convention: `OWN-01`.
 - **Visits** — their own PRD; only the cascade from pet deletion is covered here.
-- **Cross-cutting concerns** (catch-all error handling, list-404, no migration framework) —
-  [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+- **API-wide error advice, CORS, migrations** —
+  [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md) (`AUTH-01`, `AUTH-14`).
+- **Specialty lookup-table delete (refuses when in use)** —
+  [VETS_BASELINE_PRD.md](./VETS_BASELINE_PRD.md); contrast with `PET-05`.
 
 ### Cut
 
@@ -149,6 +217,26 @@ Two problems in one method: it **deletes dependent pets and visits** rather than
 (`PET-05`), and it builds every query by **string concatenation** instead of bound parameters
 (`PET-06`). The concatenated values are `Integer` path variables today, so they are
 type-constrained, but the pattern is unsafe and should not be copied.
+
+**String concatenation across delete overrides** (this slice owns pet / pet-type; Vets owns
+specialty):
+
+| Class | Concatenated queries |
+|---|---|
+| `SpringDataPetTypeRepositoryImpl` | 3 × `createQuery` |
+| `SpringDataPetRepositoryImpl` | 2 × `createQuery` |
+| `SpringDataVisitRepositoryImpl` | 1 × `createQuery` (Visits slice) |
+| `SpringDataSpecialtyRepositoryImpl` | 1 × `createNativeQuery`, 1 × `createQuery` (Vets slice) |
+
+**Lookup-table delete contrast** (`PET-05` vs specialties):
+
+| Operation | In-use behaviour | Result |
+|---|---|---|
+| `DELETE /pettypes/{id}` | **destroys** every pet of that type and all their visits, returns 204 | verified: 13 pets → 9 |
+| `DELETE /specialties/{id}` | **refuses** — FK violation surfaced as 400 | safe by accident of flush ordering |
+
+Elsewhere, cascades are intentional (owner → pets → visits; pet → visits). No delete response
+indicates collateral damage. `PET-05` is the single most dangerous defect in the product.
 
 ### Service layer
 
@@ -418,7 +506,7 @@ so `type.name` must be present and must match an existing row. An id alone is no
 - [ ] The edit-pet screen saves changes (`PET-04`)
 - [ ] `POST /pets` either works with an owner id or is removed (`PET-01`)
 - [ ] Pet creation returns `201` with a `Location` header and the persisted entity (`PET-08`)
-- [ ] `GET /pets` with no rows returns `200` and an empty array (cross-cutting)
+- [ ] `GET /pets` with no rows returns `200` and an empty array (coordinate with `OWN-01`)
 
 ### Identified gaps
 
@@ -428,13 +516,13 @@ so `type.name` must be present and must match an existing row. An id alone is no
 | `PET-02` | UI sends `typeId`; API needs nested `type` | verified both payloads; global `F2` | High |
 | `PET-03` | `GET /owners/{ownerId}/pets/{petId}` always 400 | global `B1` | High |
 | `PET-04` | `PUT /owners/{ownerId}/pets/{petId}` returns 501 | global `B2` | High |
-| `PET-05` | **Deleting a pet type deletes its pets and their visits** | 13 pets → 9, owner 1 emptied | **Critical** |
-| `PET-06` | Repository builds JPQL by string concatenation | `SpringDataPetTypeRepositoryImpl` (3×), `SpringDataPetRepositoryImpl` (2×); see `XC-06` | Medium |
+| `PET-05` | **Deleting a pet type deletes its pets and their visits** (specialties refuse — see Vets) | 13 pets → 9, owner 1 emptied | **Critical** |
+| `PET-06` | Repository builds JPQL by string concatenation (also Visit/Specialty overrides) | `SpringDataPetTypeRepositoryImpl` (3×), `SpringDataPetRepositoryImpl` (2×) | Medium |
 | `PET-07` | `getPet` maps before the null check | `PetRestController.getPet` | Low |
-| `PET-08` | `addPet` returns 200, no `Location`, echoes the request DTO | `PetRestController.addPet` | Medium |
+| `PET-08` | `addPet` returns 200, no `Location`, echoes the request DTO (other creates return 201) | `PetRestController.addPet` | Medium |
 | `PET-09` | A pet cannot be reassigned to another owner | `updatePet` ignores owner | Medium |
 | `PET-10` | Pet-type id guard returns a bare 400 with no explanation | `addPetType` | Low |
-| `PET-11` | `PetEditor` treats only `204` as success; creation returns `201` | `PetEditor.onSubmit` | Medium |
+| `PET-11` | `PetEditor` treats only `204` as success; creation returns `201` (same class of bug as `OWN-04`, `VIS-02`) | `PetEditor.onSubmit` | Medium |
 | `PET-12` | No pet deletion anywhere in the UI | `PetsTable` | Low |
 
 ---
@@ -545,7 +633,9 @@ the pet's visit history.
 
 ## Notes for AI Agents
 
-1. This is a **baseline** document. Current-behaviour sections are verified fact.
+1. This is a **baseline** document. Current-behaviour sections are verified fact. Read
+   Business Requirements before changing pet or pet-type behaviour; do not weaken a Met
+   capability while remediating a Not-met one.
 2. **Never call `DELETE /pettypes/{id}` casually** — it destroys pets and visits (`PET-05`).
 3. Do not implement Phase 1+ work without explicit approval.
 4. Adding a method to `PetRepository` or `PetTypeRepository` means implementing it **three
@@ -559,8 +649,14 @@ the pet's visit history.
 
 ## Current Status
 
-**Last Updated**: 2026-09-16
+**Last Updated**: 2026-09-22
 **Current Phase**: Phase 0 - Baseline documentation
 **Status**: COMPLETED
 **Next Steps**: Review. `PET-05` is the most urgent finding across all slices documented so far
 and is recommended for remediation ahead of cosmetic work.
+
+**Change log**:
+- 2026-09-22 — added Business Requirements (BR-PET-01–06).
+- 2026-09-22 — absorbed former cross-cutting deletion-safety, string-concat, and create-status
+  detail into `PET-05` / `PET-06` / `PET-08` / `PET-11`; removed dependency on
+  `CROSS_CUTTING_BASELINE_PRD.md`.

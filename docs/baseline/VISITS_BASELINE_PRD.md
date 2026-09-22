@@ -1,7 +1,10 @@
-Date created: 2026-09-16
-Date last modified: 2026-09-16
-
 # Visits - Baseline Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | September 16, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Baseline documentation of the visits vertical slice |
 
 > **This is a baseline PRD.** It documents the visits vertical slice **as it exists today**,
 > verified against a running instance. Current-behaviour sections are evidence-based; future
@@ -9,7 +12,12 @@ Date last modified: 2026-09-16
 >
 > Companion documents: [ARCHITECTURE.md](./ARCHITECTURE.md),
 > [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md),
-> [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+> [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md),
+> [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md),
+> [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md).
+>
+> **This slice also owns** the VisitsPage success-check mismatch (`VIS-02`) and the unused
+> `ClinicService.findVisitsByPetId` dead path (`VIS-05`).
 
 ---
 
@@ -30,6 +38,60 @@ Two data-integrity issues are specific to this slice. A visit can be saved **wit
 all** — the entity constructor defaults it to today, but the mapper overwrites that with null —
 and there is no constraint preventing a visit dated decades in the future. Since visits are the
 clinical history, both undermine the one thing this table exists to guarantee.
+
+---
+
+## Business Requirements
+
+This slice exists so the clinic can **record that care was delivered** to a pet on a given day.
+A visit is a dated clinical note, not an appointment slot and not a billing event.
+
+### Record Visits
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception / clinical staff | Records the encounter | Attach a dated note to a pet from the owner's file |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-VIS-01 | Let staff record a visit (date + description) from a pet on the owner file, then return them to that file | **Partial** — the visit is saved, but the UI reports failure and retries duplicate it (`VIS-02`) |
+| BR-VIS-03 | Require a visit date; do not persist a clinical note with no day | **Not met** — a visit can be saved with `date: null` (`VIS-03`) |
+| BR-VIS-04 | Reject dates that cannot be real clinical history (for example decades in the future) | **Not met** — `2099-12-31` is accepted (`VIS-06`) |
+| BR-VIS-05 | Let staff edit or delete a visit from the UI | **Not met** — no edit/delete surface (`VIS-05`); API update/delete exist |
+
+#### Business rules
+
+1. **A visit belongs to exactly one pet.** It cannot be moved to another pet through the current
+   update path (`VIS-04`).
+2. **Description is mandatory.** Date is business-mandatory even though the column is nullable
+   today.
+3. **A visit records that care happened, not who performed it.** There is no vet-to-visit link.
+   Introducing one is a new feature, not a baseline gap.
+4. **Recording a visit must not create a duplicate** because the screen looked like it failed.
+   Silent duplication corrupts the clinical record (`VIS-02`).
+
+### Visit History
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Any later reader of the file | Vet or receptionist | Trust that the history is complete and not silently destroyed |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-VIS-02 | Show visit history on the owner file, under each pet | **Met** — `PetsTable` lists date and description read-only |
+
+#### Business rules
+
+1. **Visits are destroyed when their pet, their owner, or their pet type is deleted.** Staff
+   have no warning in those flows today.
 
 ---
 
@@ -55,10 +117,11 @@ for clinic staff — without changing the owner or pet slices.
 
 ### Out of Scope
 
-- **Pets and owners** — their own PRDs. Visits are reached only through them.
-- **The pet-type delete cascade** that destroys visits — owned by
-  [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md) (`PET-05`), noted here as an inherited risk.
-- **Cross-cutting concerns** — [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md).
+- **Pets and owners** — their own PRDs. Visits are reached only through them. Empty-list
+  convention: [OWNERS](./OWNERS_BASELINE_PRD.md) `OWN-01`. Pet-type delete that destroys visits:
+  [PETS](./PETS_BASELINE_PRD.md) `PET-05`.
+- **API-wide error advice / migrations** —
+  [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md).
 
 ### Cut
 
@@ -345,17 +408,17 @@ Visit toVisit(VisitFieldsDto visitFieldsDto);   // generates setDate(dto.getDate
 - [ ] Visits can be edited and deleted from the UI (`VIS-05`)
 - [ ] `POST /visits` either works with a pet id or is removed (`VIS-01`)
 - [ ] The add-visit page shows an error state when the pet cannot be resolved (`VIS-07`)
-- [ ] `GET /visits` with no rows returns `200` and an empty array (cross-cutting)
+- [ ] `GET /visits` with no rows returns `200` and an empty array (coordinate with `OWN-01`)
 
 ### Identified gaps
 
 | ID | Gap | Evidence | Severity |
 |---|---|---|---|
 | `VIS-01` | `POST /visits` always 400 — `petId` stripped as `readOnly` | verified; global `B3` | High |
-| `VIS-02` | UI checks for `204`; creation returns `201`, so success looks like failure and retries duplicate | `VisitsPage.onSubmit` | **High** |
+| `VIS-02` | UI checks for `204`; creation returns `201`, so success looks like failure and retries duplicate (same class as `OWN-04`, `PET-11`) | `VisitsPage.onSubmit` | **High** |
 | `VIS-03` | A visit can be saved with no date; the entity default is overwritten by the mapper | verified: `date: null`, 201 | High |
 | `VIS-04` | A visit cannot be moved to another pet | `updateVisit` ignores `petId` | Low |
-| `VIS-05` | No per-pet visit endpoint; no visit edit or delete in the UI | `findVisitsByPetId` unused | Medium |
+| `VIS-05` | No per-pet visit endpoint; no visit edit or delete in the UI; `findVisitsByPetId` implemented in all three DAO profiles but unused | service + UI | Medium |
 | `VIS-06` | No date-range validation; far-future dates accepted | verified: 2099-12-31 → 201 | Medium |
 | `VIS-07` | No error state; unresolvable pet yields `undefined` into `PetDetails` | `VisitsPage.render` | Medium |
 | `VIS-08` | Inert `action="/api/owner"` on the form | `VisitsPage.render` | Low |
@@ -467,7 +530,9 @@ If the `petId` in the URL does not belong to the owner, `owner.pets.find(...)` y
 
 ## Notes for AI Agents
 
-1. This is a **baseline** document. Current-behaviour sections are verified fact.
+1. This is a **baseline** document. Current-behaviour sections are verified fact. Read
+   Business Requirements before changing visit behaviour; a save that looks like failure must
+   not be allowed to duplicate clinical history.
 2. Do not implement Phase 1+ work without explicit approval.
 3. The only working creation path is `POST /owners/{ownerId}/pets/{petId}/visits`, returning
    **201** — not 204. Check status codes against this document, not against assumptions.
@@ -480,8 +545,14 @@ If the `petId` in the URL does not belong to the owner, `owner.pets.find(...)` y
 
 ## Current Status
 
-**Last Updated**: 2026-09-16
+**Last Updated**: 2026-09-22
 **Current Phase**: Phase 0 - Baseline documentation
 **Status**: COMPLETED
 **Next Steps**: Review. `VIS-02` is the highest-impact defect in this slice because it silently
 corrupts the clinical record through user retries, and it is a small client-side fix.
+
+**Change log**:
+- 2026-09-22 — added Business Requirements (BR-VIS-01–05).
+- 2026-09-22 — absorbed former cross-cutting editor status-convention and dead
+  `findVisitsByPetId` notes into `VIS-02` / `VIS-05`; removed
+  `CROSS_CUTTING_BASELINE_PRD.md` dependency.

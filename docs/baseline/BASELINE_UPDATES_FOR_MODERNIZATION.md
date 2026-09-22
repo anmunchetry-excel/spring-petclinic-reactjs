@@ -10,9 +10,14 @@ defect found along the way.
 
 This document is the **chronological work log**: what was changed to get the repository running,
 and the defects found while doing it. The full, per-slice defect catalogue lives in the baseline
-PRDs — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the document map and
-[CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md) for the recommended
-remediation order across all slices.
+PRDs — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the document map and ownership of former
+platform (cross-cutting) concerns. Recommended remediation order across all PRDs:
+
+1. **`PET-05`** — stop pet-type deletion destroying pets and visits (data loss)
+2. **`AUTH-14`** — adopt a migration framework (unblocks five schema fixes)
+3. **`AUTH-03`** — hash passwords (depends on 2)
+4. **`AUTH-01`** — correct error semantics (unblocks `VET-04`, `OWN-09`)
+5. Per-slice UI fixes: `OWN-04`, `VIS-02`, `PET-02`, `PET-03`
 
 ---
 
@@ -296,7 +301,7 @@ recorded in full in the slice PRDs; summarised here so this log stays complete.
 `SpringDataPetTypeRepositoryImpl.delete` explicitly deletes every pet of that type and each
 pet's visits, then returns **204**. Verified: `DELETE /api/pettypes/1` (cat) reduced the pet
 count from 13 to 9 and left owner 1 with `"pets": []`. Nothing in the response signals the
-collateral damage. → `PET-05` / `XC-07`, and `ARCHITECTURE.md` §3.4.
+collateral damage. → `PET-05`, and `ARCHITECTURE.md` §3.4.
 
 **B9 — a vet created with an unknown specialty name silently loses it.** Specialties are
 resolved by **name**, and `findSpecialtiesByNameIn` returns an empty list for no match, so the
@@ -311,7 +316,7 @@ Far-future dates are also unconstrained — `2099-12-31` was accepted. → `VIS-
 
 **B11 — every list endpoint returns 404 when empty.** The `isEmpty()` → `NOT_FOUND` guard is
 present in all six list controllers, so a successful query with no matches is reported as a
-missing resource. → `XC-02`.
+missing resource. → `OWN-01` (same guard in all six list controllers).
 
 **B12 — owner telephone validation is duplicated and inconsistent.** The DTO allows up to 20
 characters matching `^[0-9]*$`; the entity declares `@Digits(fraction = 0, integer = 10)`. An
@@ -323,12 +328,12 @@ for `204`, but `POST /owners/{id}/pets/{petId}/visits` correctly returns `201`. 
 saved, the user is shown an error, and retrying creates a duplicate. This is the third variant
 of the same mistake: `OwnerEditor` accepts only 200/201 and breaks on the correct 204 (`F1`),
 while `PetEditor` and `VisitsPage` accept only 204 and break on the correct 201.
-→ `VIS-02`, `PET-11`, `XC-08`.
+→ `VIS-02`, `PET-11`, `OWN-04`.
 
 **Also noted:** `POST /pets` would return `200` with no `Location` header and echo back the
 request DTO rather than the persisted entity, if it were reachable at all (`PET-08`); and all
 **four** `spring-data-jpa` override classes build their queries by string concatenation rather
-than bound parameters, one of them via `createNativeQuery` (`XC-06`).
+than bound parameters, one of them via `createNativeQuery` (`PET-06`, `VET-03`).
 
 ---
 
@@ -355,7 +360,7 @@ Reordered after the per-slice review. Data loss first, then the things that bloc
    single request can destroy the clinic's records.
 2. **Adopt a database migration framework.** There is none — no Flyway, no Liquibase, and the
    DDL is drop-and-recreate across three dialects. This **blocks** at least five other fixes,
-   including B6. Tracked as `AUTH-14` / `XC-03`.
+   including B6. Tracked as `AUTH-14`.
 3. **Hash passwords (B6)** with a `PasswordEncoder`, and stop returning the password in
    `POST /users` responses. Depends on item 2, because `users.password` is `VARCHAR(20)` —
    too narrow for a bcrypt hash.
@@ -372,7 +377,7 @@ Reordered after the per-slice review. Data loss first, then the things that bloc
    not succeed with data missing.
 8. **Resolve the CORS contradiction (B7)** and collapse the two always-present security filter
    chains, so behaviour no longer depends on bean ordering.
-9. **Parameterise the repository queries** in all four override classes (`XC-06`).
+9. **Parameterise the repository queries** in all four override classes (`PET-06`, `VET-03`).
 10. **Restore type checking.** Replace the dead `typings` definitions with `@types` packages,
     then drop `transpileOnly`. The largest item, and probably wants a React upgrade alongside
     it, since React 15 is long out of support.
