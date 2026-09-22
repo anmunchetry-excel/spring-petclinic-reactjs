@@ -46,12 +46,39 @@ public class JdbcUserRepositoryImpl implements UserRepository {
         }
     }
 
+    @Override
+    public User findByUsername(String username) throws DataAccessException {
+        try {
+            User user = getByUsername(username);
+            loadRoles(user);
+            return user;
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     private User getByUsername(String username) {
 
         Map<String, Object> params = new HashMap<>();
         params.put("username", username);
         return this.namedParameterJdbcTemplate.queryForObject("SELECT * FROM users WHERE username=:username",
             params, BeanPropertyRowMapper.newInstance(User.class));
+    }
+
+    private void loadRoles(User user) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("username", user.getUsername());
+        java.util.List<Role> roles = this.namedParameterJdbcTemplate.query(
+            "SELECT id, role FROM roles WHERE username=:username",
+            params,
+            (rs, rowNum) -> {
+                Role role = new Role();
+                role.setId(rs.getInt("id"));
+                role.setName(rs.getString("role"));
+                role.setUser(user);
+                return role;
+            });
+        user.setRoles(new java.util.HashSet<>(roles));
     }
 
     private void updateUserRoles(User user) {

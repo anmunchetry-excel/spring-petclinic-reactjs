@@ -24,4 +24,13 @@ public class JpaUserRepositoryImpl implements UserRepository {
             this.em.merge(user);
         }
     }
+
+    @Override
+    public User findByUsername(String username) throws DataAccessException {
+        java.util.List<User> users = this.em.createQuery(
+                "SELECT u FROM User u LEFT JOIN FETCH u.roles WHERE u.username = :username", User.class)
+            .setParameter("username", username)
+            .getResultList();
+        return users.isEmpty() ? null : users.get(0);
+    }
 }
