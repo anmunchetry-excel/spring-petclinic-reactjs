@@ -1,7 +1,10 @@
-Date created: 2026-09-16
-Date last modified: 2026-09-16
-
 # Authentication & Identity - Baseline Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | September 16, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Baseline documentation of authentication, identity, security, and related gaps |
 
 > **This is a baseline PRD.** It documents the authentication vertical slice **as it exists
 > today**, verified against a running instance, and defines the remediation work that follows.
@@ -10,7 +13,17 @@ Date last modified: 2026-09-16
 >
 > Part of a set of per-slice baseline PRDs. Companion documents:
 > [ARCHITECTURE.md](./ARCHITECTURE.md),
+> [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md),
+> [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md),
+> [VISITS_BASELINE_PRD.md](./VISITS_BASELINE_PRD.md),
+> [VETS_BASELINE_PRD.md](./VETS_BASELINE_PRD.md),
 > [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md).
+>
+> **This slice also owns** the API-wide catch-all exception advice (`AUTH-01` / `AUTH-02`),
+> CORS consolidation (`AUTH-09`), filter-chain composition (`AUTH-10`), and adoption of a
+> migration framework (`AUTH-14`). Those formerly lived in a separate cross-cutting PRD.
+> For SPA login planning, see [First feature readiness](#first-feature-readiness--spa-auth-against-existing-http-basic)
+> and the feature PRD [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md).
 
 ---
 
@@ -36,7 +49,172 @@ remaining slices from being modernized behind a trustworthy authorization bounda
 
 ---
 
+## Business Requirements
 
+This slice exists so the clinic can **control who may change records**, without blocking
+reception staff from doing their jobs. Requirements below are business outcomes, not API
+design. Fulfilment is measured against the running instance with security both off (default)
+and on. Application users are **not** pet owners — staff operate the file on their behalf.
+
+### Authentication
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception / owner-admin staff | Uses the SPA day to day | Sign in once and keep working on owners, pets and visits |
+| Vet administrator | Maintains the staff directory | Sign in and manage vets and specialties only |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-AUTH-01 | Let a staff member sign in and use the SPA without a native browser popup | **Not met** — no login UI (`AUTH-07`) |
+
+#### Business rules
+
+1. **A disabled account cannot authenticate**, even with a correct password.
+2. **There is no supported configuration today in which the application is both usable and
+   secure.** That is the business gap this slice's remediation exists to close.
+
+### Authorization
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Reception / owner-admin staff | Day-to-day SPA | Act only within owner/pet/visit permissions |
+| Vet administrator | Staff directory | Act only within vet/specialty permissions |
+| Clinic administrator | Provisions logins | Create users; does **not** automatically get other roles |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-AUTH-02 | Deny actions the signed-in user's role does not grant, in a way the caller can tell from "bad request" | **Partial** — roles are enforced when security is on, but denial returns 400 (`AUTH-01`) |
+
+#### Business rules
+
+1. **Three flat roles.** `OWNER_ADMIN` covers owners, pets, pet types and visits. `VET_ADMIN`
+   covers vets and specialties. `ADMIN` covers user creation. `ADMIN` does **not** imply the
+   other two.
+2. **Any `OWNER_ADMIN` may act on any owner.** There is no per-record ownership (`AUTH-12`).
+   Changing that is a product decision, not a bug fix.
+
+### Credential Management
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Clinic administrator | Person who provisions logins | Create users, assign roles, disable accounts |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-AUTH-03 | Store credentials so they cannot be read back from the database or from API responses | **Not met** — plaintext `{noop}`, password echoed on create (`AUTH-03`, `AUTH-04`) |
+| BR-AUTH-04 | Let an administrator create a user with one or more of the three roles and have that user able to sign in | **Partial** — create works, but a password without an encoder prefix cannot log in (`AUTH-05`) |
+
+#### Business rules
+
+1. **Passwords must never appear in responses.** Creating a user must not echo the secret back.
+
+### Operator & API Access
+
+#### Users
+
+| Role | Who | What they need |
+|---|---|---|
+| Operator | Runs the process | Health probes and API docs reachable when security is on |
+
+#### Capabilities
+
+| ID | The system shall | Fulfilment today |
+|---|---|---|
+| BR-AUTH-05 | Keep Swagger, OpenAPI JSON and health checks usable for operators when the API is secured | **Not met** — all three return 401 (`AUTH-08`) |
+| BR-AUTH-06 | Restrict which origins may call the API | **Not met** — any origin is allowed (`AUTH-09`) |
+
+#### Business rules
+
+1. Operator and browser origins are **product constraints**, not optional demo settings, once
+   security is enabled for real use.
+
+---
+
+## First feature readiness — SPA auth against existing HTTP Basic
+
+Planning snapshot of what a **first authentication feature** can reuse versus what must still
+be built. Verified against the running baseline and this PRD's gap catalogue.
+
+### What already exists
+
+| Capability | Evidence |
+|---|---|
+| `User` / `Role` entities and `users` / `roles` schema | `model/`, `db/*/initDB.sql` |
+| Seed user `admin` / `admin` (**no password hashing**) | `{noop}admin` in `populateDB.sql` (`AUTH-03`) |
+| JDBC authentication, toggleable | `petclinic.security.enable` (default **false**); `BasicAuthenticationConfig` |
+| HTTP Basic when security is on | `anyRequest().authenticated()` + `.httpBasic()`; JDBC `usersByUsernameQuery` / `authoritiesByUsernameQuery`; no session/token; CSRF off |
+| Dual filter chains | `WebSecurityConfig` always + Disable **or** Basic (`AUTH-10`); order unpinned |
+| Method security when enabled | `@EnableGlobalMethodSecurity` only on `BasicAuthenticationConfig` |
+| `UserService` / `POST /api/users` to create users | create works; does not encode; echoes password (`AUTH-04`). **`UserRepository` / `UserService` now also support `findByUsername` / `findUser`** (Simple Auth Phases 2–3) — still no update/delete API |
+| `@PreAuthorize` role matrix on domain controllers | `OWNER_ADMIN`, `VET_ADMIN`, `ADMIN` via `Roles` bean |
+| Backend tests and patterns | `UserRestControllerTests`, `AbstractUserServiceTests`, identity readiness + findByUsername suite; MockMvc, `@WithMockUser`, `ObjectMapper` |
+| Feature PRD in progress | [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) — Phases 1–3 COMPLETED |
+
+### What is missing for a first usable SPA feature
+
+| Gap | Notes |
+|---|---|
+| Frontend login page / route | None today (`AUTH-07`) |
+| Store credentials in the SPA | No storage; `util/index.tsx` sends no auth headers |
+| Attach `Authorization` on API calls | Must be `Authorization: Basic ` + Base64(`username:password`) from the signed-in user — **not** a hardcoded `admin:admin` for every caller |
+| Logout control | Clear stored credentials; stop sending the header (no backend logout endpoint exists) |
+| Protect routes / 401 handling | Redirect unauthenticated users to login; intercept 401 |
+| Cursor rules for JUnit / TDD | **Added** — `.cursor/rules/06-unit-testing.mdc` + `07-tdd-workflow.mdc` |
+
+`UserRepository.findByUsername` / `UserService.findUser` are **implemented** (Simple Auth
+Phases 2–3, all DAO profiles). They are for app-layer use; HTTP Basic still uses JDBC SQL
+in `BasicAuthenticationConfig`.
+
+Simple Auth **Phase 4** added MockMvc coverage
+(`BasicAuthenticationIntegrationTests`, T-BE-03…07) proving valid `admin`/`admin` Basic →
+200 on `GET /api/owners/1`, and wrong/missing/unknown → 401. Production
+`BasicAuthenticationConfig` was **not** changed.
+
+
+### Design fork — do not invent a login API by accident
+
+| Option | What it is | Fit for “first feature” |
+|---|---|---|
+| **A — Wire SPA to existing HTTP Basic** | Login form captures user/pass → SPA stores them → every `fetch` adds Basic header → logout clears storage → guard routes | **Smallest coherent first feature.** Reuses `BasicAuthenticationConfig` as-is. No new token/session endpoint required. |
+| **B — `POST /api/auth/login`** | New contract that returns a token/session; SPA stores that; APIs use Bearer or cookie | **Larger change.** Not in `openapi.yml` today. Matches Auth remediation Phase 2 (token/session decision), not a thin UI wrap of current Basic Auth. |
+
+Hardcoding `Authorization` with Base64(`admin:admin`) is a **demo hack**, not the feature.
+`POST /api/auth/login` is **optional** and belongs to Option B only.
+Do **not** replace the JDBC auth SQL with an ad-hoc repository password compare unless a
+later PRD explicitly chooses a custom `AuthenticationProvider`.
+
+### Also bites when security is turned on
+
+These are not the SPA login screens themselves, but they appear as soon as
+`petclinic.security.enable=true`:
+
+1. Security is **off by default** — the UI only “works” while it stays off (`AUTH-07`).
+2. Swagger UI, `/v3/api-docs`, and `/actuator/health` return **401** (`AUTH-08`) — Basic
+   config authenticates **any** request (no permit-all exceptions).
+3. Browser may show a **native Basic popup** because of `WWW-Authenticate`.
+4. Missing role returns **400**, not 403 (`AUTH-01`).
+5. Real password hashing needs a wider `users.password` column and a migration tool
+   (`AUTH-03`, `AUTH-06`, `AUTH-14`).
+6. `PasswordEncoderFactories` is imported in `BasicAuthenticationConfig` but **unused**;
+   default `DelegatingPasswordEncoder` behaviour still applies to JDBC auth.
+
+**Feature PRD (Option A):** [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) —
+login + logout phases, bottom-up, TDD. Defer Option B until remediation Phase 2 chooses
+token vs session.
+
+---
 
 ## Hypothesis
 
@@ -166,11 +344,20 @@ MySQL and PostgreSQL additionally ship `petclinic_db_setup_*.txt` files with man
 instructions, which is itself a sign that schema management here is a documented manual
 procedure rather than an automated one.
 
-This directly constrains the work in this PRD. Both `AUTH-06` (widen `users.password` so it can
-hold a 60-character bcrypt hash) and `AUTH-13` (add the `roles` uniqueness constraint the entity
-declares) are schema changes that today would have to be applied by hand to three dialects, with
-no record of which environment has received them. Adopting a migration tool is therefore a
-**prerequisite for Phase 1**, not a later nice-to-have. Tracked as `AUTH-14`.
+This slice **owns schema-evolution remediation for the whole product** (`AUTH-14`), because
+every other slice's column/constraint fixes are blocked the same way. Pending schema changes
+already blocked:
+
+| Change | Needed for |
+|---|---|
+| Widen `users.password` from `VARCHAR(20)` | hashing passwords (`AUTH-03` / `AUTH-06`) |
+| Add the `roles` uniqueness constraint | `AUTH-13` — declared on the entity, never created |
+| Add a uniqueness constraint on `specialties.name` | Vets name-based resolution (`VET-01` / `VET-02`) |
+| Add a uniqueness constraint on `vet_specialties` | `VET-07` |
+| Reconcile `owners.telephone` width with its validation | `OWN-09` |
+
+Full topology detail: [ARCHITECTURE.md](./ARCHITECTURE.md) §2.2. Adopting a migration tool is
+a **prerequisite for Phase 1**, not a later nice-to-have. Tracked as `AUTH-14`.
 
 Seed data, from `db/hsqldb/populateDB.sql` — a single user with all three roles:
 
@@ -189,12 +376,13 @@ stored password is literally `admin`.
 **Two independent data paths read these tables**, which is the single most surprising thing
 about this slice.
 
-**Path 1 — the repository, used for writes only.** `repository/UserRepository.java` is a
-one-method interface:
+**Path 1 — the repository (writes + find by username).** `repository/UserRepository.java`
+(updated by Simple Auth Phase 2):
 
 ```java
 public interface UserRepository {
     void save(User user) throws DataAccessException;
+    User findByUsername(String username) throws DataAccessException; // null if absent
 }
 ```
 
@@ -208,8 +396,10 @@ Implemented three times and selected by profile, matching the pattern used by ev
 | `repository/jdbc/JdbcUserRepositoryImpl`            | `jdbc`                        |
 
 
-There is **no** `findByUsername`, `findAll`, `update` or `delete`. Identity management through
-the application is create-only.
+There is still **no** `findAll`, `update` or `delete` on the repository. HTTP identity
+management through the API remains create-only (`POST /api/users`). App-layer read is via
+`findByUsername` / `UserService.findUser` (Simple Auth Phases 2–3). See
+[SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md).
 
 **Path 2 — raw JDBC, used for authentication.** Spring Security never touches the repository.
 `BasicAuthenticationConfig` queries the tables directly:
@@ -337,18 +527,42 @@ Three configuration classes participate:
 | ------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `security/WebSecurityConfig`         | **none — always active** | `apiFilterChain` bean: permit all, CSRF off, plus a restrictive CORS policy                                                     |
 | `security/DisableSecurityConfig`     | `...enable=false`        | `filterChain` bean: permit all, CSRF off                                                                                        |
-| `security/BasicAuthenticationConfig` | `...enable=true`         | `filterChain` bean: `anyRequest().authenticated()`, HTTP Basic, JDBC auth, `@EnableGlobalMethodSecurity(prePostEnabled = true)` |
+| `security/BasicAuthenticationConfig` | `...enable=true`         | `filterChain` bean: `anyRequest().authenticated()`, HTTP Basic, JDBC auth (`usersByUsernameQuery` / `authoritiesByUsernameQuery`), `@EnableGlobalMethodSecurity(prePostEnabled = true)`. Imports `PasswordEncoderFactories` but does **not** declare a `PasswordEncoder` `@Bean` (unused imports). |
 
 
 Because `WebSecurityConfig` carries no `@ConditionalOnProperty`, **two** `SecurityFilterChain`
-**beans always exist**, both matching `/`**. Which one applies is decided by bean ordering rather
+**beans always exist**, both matching `/**`. Which one applies is decided by bean ordering rather
 than by anything explicit in the code. Measured behaviour shows `BasicAuthenticationConfig`
-wins for authentication, while `WebSecurityConfig`'s CORS policy never takes effect. Nothing
-pins this ordering, so it must be re-tested after any change to these classes.
+wins for authentication, while `WebSecurityConfig`'s CORS policy never takes effect (`AUTH-10`).
+Nothing pins this ordering, so it must be re-tested after any change to these classes. A refactor
+could silently make a secured build permit-all.
 
 Authentication is **stateless HTTP Basic**: credentials are sent on every request. There is no
 session, token, refresh or logout. CSRF is disabled in all three configurations, which is
 consistent with a stateless API.
+
+#### CORS — two competing policies (`AUTH-09`)
+
+`WebSecurityConfig` declares a restrictive policy:
+
+```java
+configuration.setAllowedOrigins(List.of("http://localhost:4444"));
+configuration.setAllowedMethods(List.of("OPTIONS", "GET", "POST", "PUT"));
+```
+
+Every controller separately declares `@CrossOrigin(exposedHeaders = "errors, content-type")`,
+which defaults to all origins and all methods. **The annotation wins**; the central policy is
+dead code. Verified:
+
+| Probe | Result |
+|---|---|
+| Preflight from `http://evil.com` | allowed, `Access-Control-Allow-Origin: *` |
+| Preflight for `DELETE` (absent from the allow-list) | allowed |
+| `GET` with `Origin: http://localhost:4444` | `Access-Control-Allow-Origin: *` |
+
+The API is open to any origin. The `exposedHeaders` on the annotations is load-bearing — the
+frontend reads validation failures from the `errors` header. This slice owns consolidating CORS
+and filter-chain composition for the whole API (Phase 4).
 
 ### Authorization model
 
@@ -380,27 +594,48 @@ The annotations live on the controllers of the other slices and are always prese
 bytecode; `@EnableGlobalMethodSecurity` in `BasicAuthenticationConfig` is what activates them.
 Enabling security therefore changes authorization behaviour across the entire API at once.
 
-### Error handling
+### Error handling — API-wide catch-all (owned by this slice)
 
-`rest/advice/ExceptionControllerAdvice` declares a single catch-all handler:
+`rest/advice/ExceptionControllerAdvice` is a single `@ControllerAdvice` for the whole API.
+This slice owns its remediation because authorization status codes and internal-type leakage
+are security concerns, and the same handler is what every other slice hits.
 
 ```java
 @ExceptionHandler(Exception.class)
 public ResponseEntity<String> exception(Exception e) {
+    ObjectMapper mapper = new ObjectMapper();
+    ErrorInfo errorInfo = new ErrorInfo(e);     // className + exMessage
     ...
     return ResponseEntity.badRequest().body(respJSONstring);   // always 400
 }
 ```
 
-For this slice that means an `AccessDeniedException` is returned as **400 instead of 403**, with
-a body disclosing the internal type:
+Observed consequences (verified across slices; fixing here is a **breaking** API-wide change):
+
+| Actual condition | Correct status | Returned |
+|---|---|---|
+| User lacks the required role | 403 | **400** (`AUTH-01`) |
+| Route matches no controller | 404 | **400** |
+| Foreign-key violation (in-use specialty) | 409 | **400** (`VET-04`) |
+| Entity-level validation failure at persist | 400 or 422 | 400 with a raw exception dump (`OWN-09`) |
+
+Body examples:
 
 ```json
 {"className":"org.springframework.security.access.AccessDeniedException","exMessage":"Access is denied"}
+{"className":"org.springframework.dao.DataIntegrityViolationException","exMessage":"could not execute statement [integrity constraint violation: foreign key no action ; FK_VET_SPECIALTIES_SPECIALTIES table: VET_SPECIALTIES] ..."}
 ```
 
-401 responses are produced by the Spring Security filter chain, which runs before the
-`@ControllerAdvice`, so those are correct.
+This leaks the framework, persistence layer, table names and constraint names (`AUTH-02`).
+
+**Preserve:** `MethodArgumentNotValidException` → 400 with structured detail in the `errors`
+header via `BindingErrorsResponse`. Controllers expose that header through `@CrossOrigin`.
+
+401 responses come from the Spring Security filter chain (before `@ControllerAdvice`) and are
+correct.
+
+> Coordinate with Owners, Pets, Visits and Vets when changing these status codes — their
+> acceptance criteria encode today's 400s.
 
 ### User Interface Requirements
 
@@ -576,8 +811,9 @@ auth. Selection depends on deployment topology, which is undecided.
 
 - `src/main/java/.../model/User.java` - entity keyed by username, eager `roles`
 - `src/main/java/.../model/Role.java` - entity; `name` ↔ `role` column; `@JsonIgnore` back-reference
-- `src/main/java/.../repository/UserRepository.java` - single-method write interface
+- `src/main/java/.../repository/UserRepository.java` - `save` + `findByUsername` (null if absent)
 - `src/main/java/.../repository/{jpa,jdbc,springdatajpa}/*UserRepository*.java` - three implementations
+- `src/main/java/.../service/UserService.java` / `UserServiceImpl.java` - `saveUser` + `findUser`
 - `src/main/java/.../service/UserServiceImpl.java` - role normalisation; **no password encoding**
 - `src/main/java/.../rest/controller/UserRestController.java` - `POST /api/users`, `@PreAuthorize(ADMIN)`
 - `src/main/java/.../mapper/UserMapper.java` - MapStruct User/Role ↔ DTO
@@ -683,20 +919,20 @@ the default instance on 9966.
 
 | ID        | Gap                                                                    | Evidence                                            | Severity                |
 | --------- | ---------------------------------------------------------------------- | --------------------------------------------------- | ----------------------- |
-| `AUTH-01` | Access denied returns 400, not 403                                     | `GET /owners` as `VET_ADMIN`-only user → 400        | High                    |
-| `AUTH-02` | Error bodies leak internal class names                                 | `{"className":"...AccessDeniedException"}`          | Medium                  |
+| `AUTH-01` | Access denied returns 400, not 403 (catch-all advice; API-wide)         | `GET /owners` as `VET_ADMIN`-only user → 400        | High                    |
+| `AUTH-02` | Error bodies leak internal class names (API-wide)                      | `{"className":"...AccessDeniedException"}`          | Medium                  |
 | `AUTH-03` | Passwords stored in plaintext                                          | `UserServiceImpl.saveUser`; seed uses `{noop}`      | Critical                |
 | `AUTH-04` | Password echoed in API response                                        | `POST /api/users` 201 body                          | High                    |
 | `AUTH-05` | Passwords without an encoder prefix cannot log in                      | `DelegatingPasswordEncoder` behaviour               | Medium                  |
 | `AUTH-06` | `users.password` is `VARCHAR(20)`                                      | `initDB.sql`                                        | High (blocks `AUTH-03`) |
 | `AUTH-07` | Frontend has no authentication whatsoever                              | no matches in `client/src`                          | Critical                |
 | `AUTH-08` | Swagger UI, api-docs and `actuator/health` all 401 when secured        | measured: 401, 401, 401                             | High                    |
-| `AUTH-09` | `WebSecurityConfig` CORS policy is dead code                           | preflight from `evil.com` allowed; `DELETE` allowed | High                    |
+| `AUTH-09` | Two CORS policies; restrictive `WebSecurityConfig` one is dead code    | preflight from `evil.com` allowed; `DELETE` allowed | High                    |
 | `AUTH-10` | Two always-present filter chains; ordering decides behaviour           | `WebSecurityConfig` has no condition                | Medium                  |
-| `AUTH-11` | No user read/update/delete; create-only identity management            | `UserRepository` has only `save`                    | Medium                  |
+| `AUTH-11` | No user update/delete; create-only **API**; find added for app layer | `findByUsername`/`findUser` added (Simple Auth); still no update/delete endpoints | Medium (partially addressed) |
 | `AUTH-12` | Flat roles; no per-record ownership                                    | any `OWNER_ADMIN` may edit any owner                | Medium                  |
 | `AUTH-13` | `roles` uniqueness constraint declared on the entity but never created | `ddl-auto=none`                                     | Low                     |
-| `AUTH-14` | No database migration framework; schema is drop-and-recreate SQL       | no Flyway/Liquibase in `pom.xml` or the 90 bundled jars | High (blocks `AUTH-06`, `AUTH-13`) |
+| `AUTH-14` | No database migration framework; schema is drop-and-recreate SQL (product-wide) | no Flyway/Liquibase in `pom.xml` or the 90 bundled jars | High (blocks `AUTH-06`, `AUTH-13`, `OWN-09`, `VET-01`, `VET-07`) |
 
 
 ---
@@ -824,9 +1060,19 @@ by `AUTH-03`.
 
 **Problem**: A user without the required role gets 400 with an `AccessDeniedException` body.
 **Cause**: `@ExceptionHandler(Exception.class)` catches `AccessDeniedException` and returns
-`ResponseEntity.badRequest()`.
-**Solution**: Add a dedicated handler for `AccessDeniedException` returning 403 (`AUTH-01`).
+`ResponseEntity.badRequest()`. The same catch-all also turns unmatched routes, FK violations and
+persist-time validation into 400 — read `className` before assuming the request was malformed.
+**Solution**: Add specific handlers: `AccessDeniedException` → 403, not-found → 404,
+`DataIntegrityViolationException` → 409; stop returning `className` (`AUTH-01`, `AUTH-02`).
+Coordinate with other slice PRDs — their verified status tables will change.
 **Code Reference**: `rest/advice/ExceptionControllerAdvice.java:42-53`
+
+### CORS behaves differently from the configuration
+
+**Problem**: `WebSecurityConfig` restricts origins, but any origin is accepted.
+**Cause**: Controller `@CrossOrigin` annotations take precedence (`AUTH-09`).
+**Solution**: Change the annotations (keep `exposedHeaders: errors`), not the unused central
+config, until Phase 4 consolidates them.
 
 ### Browser shows a native credential popup
 
@@ -882,7 +1128,13 @@ schema changes manually to each environment and each dialect, and verify them ex
 When working with this PRD:
 
 1. This is a **baseline** document. Sections describing current behaviour are verified fact —
-  do not "correct" them to match what the code looks like it should do.
+  do not "correct" them to match what the code looks like it should do. Read
+  [Business Requirements](#business-requirements) and
+  [First feature readiness](#first-feature-readiness--spa-auth-against-existing-http-basic)
+  before proposing SPA auth work; prefer Option A unless remediation Phase 2 has chosen a
+  token strategy. Implement Option A against
+  [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) — do not invent Option B by
+  accident.
 2. Read Scope before acting. Other vertical slices have their own baseline PRDs; do not modify
   them from here beyond their `@PreAuthorize` annotations.
 3. Do not implement Phase 1+ work without explicit approval. Phase 0 is the only completed phase.
@@ -901,13 +1153,14 @@ When working with this PRD:
 
 ## Current Status
 
-**Last Updated**: 2026-09-16
+**Last Updated**: 2026-09-22
 **Current Phase**: Phase 0 - Baseline documentation
 **Status**: COMPLETED
-**Next Steps**: Review this baseline, then proceed to the next vertical-slice baseline PRD
-(Owners). Remediation Phase 1 is not started and requires approval before any code change.
+**Next Steps**: For SPA auth, follow
+[SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) (Option A). Remediation phases
+for hashing / migrations / AUTH-01 etc. remain separate and require approval.
 
-**Open decisions blocking Phase 1**:
+**Open decisions blocking Auth remediation Phase 1 (hashing / migrations)**:
 
 1. Which migration framework to adopt (`AUTH-14`) — Flyway or Liquibase.
 2. Whether all three database dialects (HSQLDB, MySQL, PostgreSQL) must continue to be
@@ -919,3 +1172,17 @@ When working with this PRD:
 - 2026-09-16 — added `AUTH-14` (no migration framework) after verifying the absence of Flyway
   and Liquibase in `pom.xml` and the packaged artefact; recorded it as a prerequisite for
   Phase 1 and added the related risks, troubleshooting entries and success metric.
+- 2026-09-22 — added Business Requirements (users, capabilities BR-AUTH-01–06, business rules,
+  current fulfilment).
+- 2026-09-22 — absorbed former cross-cutting content: API-wide error advice detail, migration
+  blockers table, CORS probe matrix; this PRD now owns `AUTH-01`/`AUTH-02`/`AUTH-09`/`AUTH-10`/
+  `AUTH-14` as product-wide concerns.
+- 2026-09-22 — added **First feature readiness** (exists vs missing for SPA + HTTP Basic;
+  Option A vs `POST /api/auth/login`; caveats when enabling security).
+- 2026-09-22 — linked [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md); refreshed
+  First feature readiness and BasicAuthenticationConfig notes against verified security
+  sources (dual chains, JDBC auth SQL, unused PasswordEncoder imports, no backend logout).
+- 2026-09-22 — Simple Auth Phases 2–3: documented `UserRepository.findByUsername` / `UserService.findUser` (all DAO profiles); `AUTH-11` marked partially addressed; First feature readiness updated.
+- 2026-09-22 — Simple Auth Phase 4: documented Basic auth MockMvc tests (T-BE-03…07); login probe `GET /api/owners/1`; `BasicAuthenticationConfig` still unchanged.
+- 2026-09-22 — Simple Auth Phase 5: SPA Option A login wired (localStorage + Basic header + route guards); see feature PRD.
+- 2026-09-22 — Simple Auth Phase 6: SPA logout (`logout()` + Menu); feature Option A complete per SIMPLE_AUTH_PRD.

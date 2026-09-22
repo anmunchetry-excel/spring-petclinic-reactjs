@@ -5,7 +5,7 @@ layer, the service layer, the REST controllers, the authentication and authoriza
 and the React frontend.
 
 - **Date:** 2026-09-16
-- **Last reviewed:** 2026-09-16
+- **Last reviewed:** 2026-09-22
 
 Everything here was verified against a running instance. Where behaviour differs from what the
 code appears to promise, that is called out inline and cross-referenced to the gap IDs in the
@@ -13,22 +13,39 @@ documents below.
 
 ### The baseline document set
 
-This is the **system-wide** view. Per-slice detail, gap catalogues and remediation phases live
-in the PRDs.
+This is the **system-wide** view. Per-slice detail, business requirements, gap catalogues and
+remediation phases live in the PRDs. **Every PRD must include a Business Requirements section**
+(named business-area headings; Users / Capabilities / Business rules; baselines add Current
+fulfilment), placed after Overview/Problem. See `docs/TEMPLATE_TECHNICAL_PRD.md` and
+`.cursor/rules/00-technical-prd.mdc`.
+
+Platform concerns that used to live in a separate cross-cutting PRD are now owned by the slice
+that remediates them:
+
+| Concern | Owning PRD | Gap IDs |
+|---|---|---|
+| Catch-all errors → 400; internal type leak | Authentication | `AUTH-01`, `AUTH-02` |
+| Empty list → 404 | Owners (all six list controllers) | `OWN-01` |
+| No migration framework | Authentication | `AUTH-14` |
+| CORS / dual filter chains | Authentication | `AUTH-09`, `AUTH-10` |
+| String-concat delete queries | Pets / Vets / Visits | `PET-06`, `VET-03` |
+| Destructive pet-type delete | Pets | `PET-05` |
+| Create/update status vs editor checks | Owners / Pets / Visits | `OWN-04`, `PET-08`, `PET-11`, `VIS-02` |
+| Dead code (unused methods, aspect, cache) | Visits / Vets / Architecture §5.5 | `VIS-05`, `VET-08` |
 
 | Document | Covers | Gap IDs |
 |---|---|---|
 | **ARCHITECTURE.md** *(this file)* | layer-by-layer view of the whole system | — |
 | [BASELINE_UPDATES_FOR_MODERNIZATION.md](./BASELINE_UPDATES_FOR_MODERNIZATION.md) | work log: what was changed to make it run, and every defect found | `B1`–`B12`, `F1`–`F4` |
-| [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md) | users, roles, security config, authorization | `AUTH-01`–`AUTH-14` |
-| [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md) | owners, the domain aggregate root | `OWN-01`–`OWN-13` |
-| [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md) | pets and pet types | `PET-01`–`PET-12` |
+| [AUTHENTICATION_BASELINE_PRD.md](./AUTHENTICATION_BASELINE_PRD.md) | users, roles, security, CORS, migrations, API-wide error advice; **first-feature readiness** (SPA + HTTP Basic) | `AUTH-01`–`AUTH-14` |
+| [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) | **Feature:** SPA login/logout on existing HTTP Basic (Option A) | — |
+| [OWNERS_BASELINE_PRD.md](./OWNERS_BASELINE_PRD.md) | owners; empty-list convention | `OWN-01`–`OWN-13` |
+| [PETS_BASELINE_PRD.md](./PETS_BASELINE_PRD.md) | pets and pet types; destructive type delete | `PET-01`–`PET-12` |
 | [VISITS_BASELINE_PRD.md](./VISITS_BASELINE_PRD.md) | visits | `VIS-01`–`VIS-08` |
 | [VETS_BASELINE_PRD.md](./VETS_BASELINE_PRD.md) | vets and specialties | `VET-01`–`VET-09` |
-| [CROSS_CUTTING_BASELINE_PRD.md](./CROSS_CUTTING_BASELINE_PRD.md) | concerns spanning every slice | `XC-01`–`XC-09` |
 
 > **Most urgent finding across the whole set:** `DELETE /api/pettypes/{id}` deletes every pet of
-> that type and all their visits, returning `204` (§3.4, `PET-05` / `XC-07`).
+> that type and all their visits, returning `204` (§3.4, `PET-05`).
 
 ### The system at a glance
 
@@ -115,7 +132,7 @@ flowchart TD
     FILTER --> DISP["DispatcherServlet"]
     DISP --> CTRL["@RestController<br/><i>§5 — implements a generated OpenAPI interface</i>"]
     CTRL --> AUTHZ{"@PreAuthorize<br/><i>§6.4</i>"}
-    AUTHZ -- denied --> ADVICE["ExceptionControllerAdvice<br/><b>returns 400, not 403</b> — XC-01"]
+    AUTHZ -- denied --> ADVICE["ExceptionControllerAdvice<br/><b>returns 400, not 403</b> — AUTH-01"]
     AUTHZ -- allowed --> MAP["MapStruct mapper<br/><i>§5.3 — DTO ⇄ entity</i>"]
     MAP --> SVC["ClinicService<br/><i>§4 — @Transactional boundary</i>"]
     SVC --> REPO["Repository<br/><i>§3 — one of three implementations</i>"]
@@ -444,7 +461,7 @@ for (Pet pet : pets) {
 
 Verified: `DELETE /api/pettypes/1` (cat) returned **204** and reduced the pet count from 13 to 9,
 leaving owner 1 with `"pets": []`. Nothing in the response indicates the collateral damage. This
-is the single most dangerous defect in the codebase, tracked as `PET-05` / `XC-07`.
+is the single most dangerous defect in the codebase, tracked as `PET-05`.
 
 **Specialty deletion behaves the opposite way, and only by accident.** `em.remove` is queued
 before the join-table cleanup, so the flush attempts the specialty delete first and the foreign
@@ -455,7 +472,7 @@ silently turn it into the pet-type behaviour.
 **All four classes build their queries by string concatenation** rather than bound parameters,
 including one `createNativeQuery`. The concatenated values are `Integer` path variables today,
 so they are type-constrained and not currently exploitable, but the pattern is unsafe and should
-not be copied (`XC-06`).
+not be copied (`PET-06`).
 
 ---
 
@@ -597,7 +614,7 @@ missing → `404`. Two deviations are worth knowing:
 
 - **List endpoints return `404` rather than an empty array** when nothing matches. The
   `isEmpty()` → `NOT_FOUND` guard is present in all six list controllers, so this is a
-  system-wide convention rather than an oversight in one place (`XC-02`).
+  system-wide convention rather than an oversight in one place (`OWN-01`).
 - **`POST /pets` breaks the create convention**, returning `200` with no `Location` header and
   echoing back the request DTO rather than the persisted entity (`PET-08`). It is unreachable
   in practice — `ownerId` is stripped as `readOnly`, so the insert always violates a not-null
@@ -640,7 +657,7 @@ public ResponseEntity<String> exception(Exception e) {
 ```
 
 Every unhandled exception becomes a **400** carrying `{"className": ..., "exMessage": ...}`.
-This is defect **B5** / `XC-01`, and it is the single biggest source of misleading status codes
+This is defect **B5** / `AUTH-01`, and it is the single biggest source of misleading status codes
 in the API. Verified consequences, each observed in a different slice:
 
 | Actual condition | Correct status | Returned |
@@ -665,8 +682,9 @@ export that header via `@CrossOrigin`).
 (`/petclinic/actuator/health`). `util/CallMonitoringAspect` implements JMX call timing around
 `@Repository` beans but is **never registered as a bean**, so it does not run. The
 `spring-boot-starter-cache` dependency is present but unused, as are
-`ClinicService.findVisitsByPetId` (no endpoint calls it) and the duplicate
-`findVets()` / `findAllVets()` pair (`XC-09`).
+`ClinicService.findVisitsByPetId` (no endpoint calls it — `VIS-05`), the duplicate
+`findVets()` / `findAllVets()` pair (`VET-08`), `GET /oops` (in `openapi.yml`, no controller —
+`B4`), and leftover `client/server.js` / `client/.babelrc` from the webpack migration.
 
 ---
 
@@ -674,6 +692,10 @@ export that header via `@CrossOrigin`).
 
 The most consequential part of the configuration, and the part where intent and behaviour
 diverge most.
+
+> **SPA login/logout feature (Option A):** see
+> [SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md). It reuses the stack below; it
+> does not introduce tokens or a server session.
 
 ### 6.1 The switch
 
@@ -734,7 +756,15 @@ auth.jdbcAuthentication()
 ```
 
 There are no sessions, tokens or JWTs — credentials are sent on every request. CSRF is disabled
-in all configurations, which is consistent with a stateless API.
+in all configurations, which is consistent with a stateless API. `UserRepository` is **not**
+used for HTTP Basic authentication (create + `findByUsername` for app-layer use; Security still
+uses JDBC SQL in `BasicAuthenticationConfig`). `BasicAuthenticationConfig` imports
+`PasswordEncoderFactories` / `PasswordEncoder` but does not register a `PasswordEncoder` bean;
+JDBC auth uses Spring Security’s default `DelegatingPasswordEncoder` (seed passwords use
+`{noop}…`). Simple Auth Phase 4 verifies this path with
+`BasicAuthenticationIntegrationTests` (probe `GET /api/owners/1`). Simple Auth Phase 5 wires
+the SPA (localStorage + Basic header via `apiFetch` / `submitForm`). See
+[SIMPLE_AUTH_PRD.md](../authentication/SIMPLE_AUTH_PRD.md) for SPA Option A.
 
 ### 6.4 Authorization model
 
@@ -928,7 +958,7 @@ directions**, because no convention is documented anywhere:
 | `PetEditor` | `204` | `201` on create | redirect never fires (`PET-11`) |
 
 This is the clearest argument in the codebase for generating the client from `openapi.yml`
-rather than hand-writing it (`XC-08`).
+rather than hand-writing it (`OWN-04` / `PET-11` / `VIS-02`).
 
 ### 7.4 Contract drift from the backend
 
