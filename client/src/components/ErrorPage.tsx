@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { url } from '../util';
+import { apiFetch } from '../util';
 
 interface IErrorPageState {
   error?: {
@@ -16,7 +16,7 @@ export default class ErrorPage extends React.Component<void, IErrorPageState> {
   }
 
   componentDidMount() {
-    fetch(url('api/oops'))
+    apiFetch('api/oops')
       .then(response => response.json())
       .then(error => this.setState({error}));
   }

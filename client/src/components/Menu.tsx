@@ -1,10 +1,17 @@
 import * as React from 'react';
 
+import { isLoggedIn, logout } from '../util/auth';
+
 const MenuItem = ({active, url, title, children}: { active: boolean, url: string, title: string, children?: any }) => (
   <li className={active ? 'active' : ''}>
     <a href={url} title={title}>{children}</a>
   </li>
 );
+
+const onLogout = (event) => {
+  event.preventDefault();
+  window.location.href = logout();
+};
 
 export default ({name}: { name: string }) => (
   <nav className='navbar navbar-default' role='navigation'>
@@ -39,6 +46,20 @@ export default ({name}: { name: string }) => (
             <span className='glyphicon glyphicon-warning-sign' aria-hidden='true'></span>&nbsp;
                     <span>Error</span>
           </MenuItem>
+
+          {isLoggedIn() ? (
+            <li>
+              <a href='/login' title='log out' onClick={onLogout}>
+                <span className='glyphicon glyphicon-log-out' aria-hidden='true'></span>&nbsp;
+                <span>Logout</span>
+              </a>
+            </li>
+          ) : (
+            <MenuItem active={name === '/login'} url='/login' title='log in'>
+              <span className='glyphicon glyphicon-log-in' aria-hidden='true'></span>&nbsp;
+              <span>Login</span>
+            </MenuItem>
+          )}
         </ul>
       </div>
     </div>

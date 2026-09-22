@@ -1,6 +1,7 @@
 require('jest');
 
 import { url, submitForm } from '../../src/util';
+import { setCredentials, clearCredentials } from '../../src/util/auth';
 
 import * as React from 'react';
 
@@ -8,6 +9,17 @@ fetch = require('./fetch-mock');
 const fetchMock: any = fetch;
 
 describe('util', () => {
+  beforeEach(() => {
+    fetchMock.mockClear();
+    clearCredentials();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    clearCredentials();
+    localStorage.clear();
+  });
+
   describe('url', () => {
     it('returns url with full path', () => {
       expect(url('xxx')).toBe('http://localhost:9966/petclinic/xxx');
@@ -19,8 +31,6 @@ describe('util', () => {
   });
 
   describe('submitForm', () => {
-    beforeEach(() => fetchMock.mockClear());
-
     it('submits all data', () => {
       fetchMock.mockResponse(JSON.stringify({ 'x': 'y' }), { status: 200 });
       return submitForm('POST', '/some-enzyme', { name: 'Test' }, (status, response) => {
@@ -42,6 +52,16 @@ describe('util', () => {
         expect(fetchMock.mock.calls.length).toBe(1);
         expect(status).toBe(204);
         expect(response).toEqual({});
+      });
+    });
+
+    it('T-FE-05: attaches Authorization Basic when credentials are stored', () => {
+      setCredentials('admin', 'secret');
+      fetchMock.mockResponse(JSON.stringify({}), { status: 200 });
+      return submitForm('POST', '/api/owners', { firstName: 'A' }, () => {
+        expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+          'Basic ' + btoa('admin:secret')
+        );
       });
     });
   });

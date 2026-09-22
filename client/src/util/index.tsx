@@ -1,4 +1,5 @@
 import { IHttpMethod } from '../types';
+import { requestHeaders } from './auth';
 
 declare var __API_SERVER_URL__;
 const BACKEND_URL = (typeof __API_SERVER_URL__ === 'undefined' ? 'http://localhost:9966/petclinic' : __API_SERVER_URL__);
@@ -6,6 +7,14 @@ const BACKEND_URL = (typeof __API_SERVER_URL__ === 'undefined' ? 'http://localho
 // Callers pass paths both with and without a leading slash. The backend rejects
 // the resulting double slash with a 400, so normalise to exactly one.
 export const url = (path: string): string => `${BACKEND_URL}/${path.replace(/^\/+/, '')}`;
+
+/**
+ * fetch wrapper that attaches Basic auth from localStorage when present.
+ */
+export const apiFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
+  const headers = requestHeaders((init.headers || {}) as { [key: string]: string });
+  return fetch(url(path), Object.assign({}, init, { headers }));
+};
 
 /**
  * path: relative PATH without host and port (i.e. '/api/123')
@@ -18,10 +27,10 @@ export const submitForm = (method: IHttpMethod, path: string, data: any, onSucce
 
   const fetchParams = {
     method: method,
-    headers: {
+    headers: requestHeaders({
       'Accept': 'application/json',
       'Content-Type': 'application/json'
-    },
+    }),
     body: JSON.stringify(data)
   };
 
