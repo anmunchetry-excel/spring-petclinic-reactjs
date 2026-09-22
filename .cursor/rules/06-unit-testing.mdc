@@ -1,0 +1,30 @@
+---
+alwaysApply: false
+---
+# 06 — Unit testing (existing)
+
+Use the **existing** test layout and styles. Do not invent a parallel framework.
+
+| Kind | Location | Style |
+|---|---|---|
+| REST | `src/test/.../rest/controller/*Tests.java` | MockMvc, `@WithMockUser`, `ObjectMapper` |
+| Service | `src/test/.../service/**/Abstract*Tests.java` | abstract + profile subclasses |
+| Client | `client/tests/__tests__/*` | Jest |
+
+## Rules
+
+1. Match neighbouring tests in the same package (imports, helpers, naming `*Tests`).
+2. REST: assert status **and** body/`Location` where the PRD cares; use `@WithMockUser`
+   when security is under test.
+3. Service: extend the abstract suite so **all three** DAO profiles stay covered when
+   behaviour changes.
+4. Client: colocate under `client/tests/__tests__/`; prefer testing `util` and pure helpers.
+5. Don’t weaken assertions to match the catch-all **400** unless the PRD says that status
+   is expected (`AUTH-01`). Don’t disable tests to go green.
+
+```bash
+./mvnw.cmd -Dtest=UserRestControllerTests#testCreateUserSuccess test
+cd client && npm test -- --testPathPattern=util.test
+```
+
+Workflow (red → green → refactor): `07-tdd-workflow.mdc`.

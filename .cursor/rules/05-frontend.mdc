@@ -1,0 +1,74 @@
+---
+description: Frontend — React 15 UI, HTTP client, webpack 5 build
+alwaysApply: false
+---
+# 05 — Frontend
+
+React **15** SPA on port **4444** (older API shapes). Backend API:
+`http://localhost:9966/petclinic/api`. No proxy — `__API_SERVER_URL__` is compiled in.
+Broken backend routes: `04-api-controllers.mdc`.
+
+| Area | Path |
+|---|---|
+| Routes | `configureRoutes.tsx` |
+| Pages | `components/{owners,pets,visits,vets}/` |
+| Forms | `components/form/` + `Constraints` |
+| Types | `types/index.ts` |
+| HTTP util | `util/index.tsx` (`url()`) |
+
+## UI
+
+1. Class components; fetch in `componentDidMount` → `this.setState`. No Redux/context unless
+   requested. Prefer `<Link>` over `<a href>`.
+2. Reuse `form/` controls; don’t invent a second form stack.
+3. Always handle fetch failure in state (don’t leave `null` forever).
+4. Edit vs new titles must match mode; don’t revive singular `/api/owner`.
+5. **Auth (Option A):** login → store user/pass → Basic header on requests → logout clears
+   storage → guard routes / 401. No hardcoded `admin:admin`. Details:
+   `docs/authentication/SIMPLE_AUTH_PRD.md` (reuses existing `BasicAuthenticationConfig`).
+
+## HTTP
+
+Hand-written client (not generated from `openapi.yml`).
+
+1. Build URLs with `url()` only — never hardcode host/port. Don’t hand-concatenate paths
+   (leading `/` once caused `//api/...` → 400). Plural paths: `/api/owners/{id}`.
+
+   ```ts
+   fetch(url('api/owners/1'))  // ✅
+   ```
+
+2. `submitForm` passes **status**. Treat **create = 201**, **update = 204**:
+
+   | Today | Accepts | API returns | Bug |
+   |---|---|---|---|
+   | `OwnerEditor` | 200/201 | 204 update | crash after save (`F1`) |
+   | `VisitsPage` | 204 | 201 create | false error; retry duplicates (`F4`) |
+   | `PetEditor` | 204 | 201 create | no redirect (`PET-11`) |
+
+3. Pet body needs nested `type`, not `typeId` (`F2`):
+
+   ```ts
+   // ❌ { typeId: 2 }
+   // ✅ { type: { id: 2, name: 'dog' } }
+   ```
+
+4. Prefer `GET/PUT /pets/{id}` over nested owner pet GET/PUT.
+
+## Build (webpack 5)
+
+After dependency changes run `npm run build:prod`.
+
+| Concern | Keep | Don’t bring back |
+|---|---|---|
+| TS | `ts-loader` `transpileOnly: true` | `babel-loader` / Babel 6 |
+| Assets | webpack 5 asset modules | `url-loader` / `file-loader` |
+| CSS | style/css/less-loader current majors | `extract-text-webpack-plugin` |
+| Dev | `webpack serve` + wds 5 | `client/server.js` |
+| Types | none until `@types` | `typings` / `postinstall typings install` |
+
+1. `transpileOnly` is deliberate — typecheck without `@types` fails everywhere.
+2. `npm install` must work with no `--legacy-peer-deps`.
+3. `devServer.historyApiFallback: true` required.
+4. `__API_SERVER_URL__` via DefinePlugin; same default in dev and prod.
+5. Verify: `npm run build:prod`, `npm test`, `npm start`.

@@ -1,0 +1,52 @@
+---
+description: Service + DAO — transactions, null-on-absence, three repository profiles
+alwaysApply: false
+---
+# 03 — Service + DAO
+
+`ClinicServiceImpl` is a thin facade; its job is the **transaction boundary**.
+Credentials / `saveUser`: `04-api-controllers.mdc` (security). Compare **ids**, not
+`equals` (`02-entity-layer.mdc`, `B1`).
+
+## Service rules
+
+1. Every method: `@Transactional(readOnly = true)` or `@Transactional` (writes).
+2. **Not found → `null`**, never throw — controllers map that to 404. Normalise DAO differences:
+
+   ```java
+   try {
+       return ownerRepository.findById(id);
+   } catch (ObjectRetrievalFailureException | EmptyResultDataAccessException e) {
+       return null;
+   }
+   ```
+
+3. No validation or persistence details here — DTOs / repositories own those.
+
+## DAO rules
+
+Each repository interface has **three** implementations; one profile is active:
+
+| Package | Profile |
+|---|---|
+| `repository/springdatajpa/` | `spring-data-jpa` *(default)* |
+| `repository/jpa/` | `jpa` |
+| `repository/jdbc/` | `jdbc` |
+
+1. New interface method → implement **all three** (or say which you skipped).
+2. Classes need `@Repository` + `@Profile("...")`.
+3. Prefer derived/`@Query`. Use `*RepositoryOverride` + `*Impl` only when one query isn’t
+   enough (Pet, PetType, Specialty, Visit deletes).
+4. **Deletes:** `SpringDataPetTypeRepositoryImpl` cascade-deletes pets + visits (`PET-05`) —
+   never call casually / never copy. Specialty delete “refuses” only via flush order
+   (`VET-03`) — make refusal explicit if you touch it.
+5. **Bind parameters** — no string-concat JPQL/SQL (`PET-06`, `VET-03`):
+
+   ```java
+   // ❌ "... WHERE type.id=" + id
+   // ✅ "... WHERE pet.type.id = :typeId").setParameter("typeId", id)
+   ```
+
+6. Eager graphs need `left join fetch` (Open-in-View is off).
+7. Login HTTP Basic does **not** use `UserRepository` (raw JDBC in `BasicAuthenticationConfig`).
+   `UserRepository` supports `save` and `findByUsername` (null if absent) for app-layer use.

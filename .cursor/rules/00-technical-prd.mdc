@@ -1,0 +1,70 @@
+---
+description: Technical PRD — use docs/TEMPLATE_TECHNICAL_PRD.md for all feature PRDs
+globs: docs/**/*.md
+alwaysApply: false
+---
+
+# 00 — Technical PRD template
+
+Canonical template: `docs/TEMPLATE_TECHNICAL_PRD.md`.
+Copy it for every new feature or baseline slice PRD. Do **not** invent a parallel outline.
+
+## Required document header (every PRD)
+
+Immediately under the title, include this metadata table:
+
+| Field | Value |
+|-------|-------|
+| Created | [Month Day, Year] |
+| Version | 1.0 - Initial |
+| Version Notes | [One-line summary] |
+
+Example (`docs/authentication/SIMPLE_AUTH_PRD.md`):
+
+| Field | Value |
+|-------|-------|
+| Created | January 19, 2026 |
+| Version | 1.0 - Initial |
+| Version Notes | Initial PRD for simple login/logout flow |
+
+## Required sections (in order)
+
+1. Overview/Problem
+2. **Business Requirements — MANDATORY on every PRD** (feature and baseline). Never omit.
+   Group under **named business-area headings** appropriate to the slice
+   (auth example: **Authentication**, **Session Management**, **Logout**;
+   owners example: **Find & View Owners**, **Register & Edit Owners**, **Owner Deletion**).
+   Under each area: Users / Capabilities / Business rules (+ Current fulfilment for baselines).
+3. Hypothesis (`We believe that [solution] will [outcome] for [user].`)
+4. Scope (In Scope / Out of Scope / Cut)
+5. Technical Requirements (Database Schema, API Endpoints, User Interface)
+6. Implementation Phases (`COMPLETED` | `IN PROGRESS` | `PLANNED`)
+7. Technical Implementation Details
+8. Acceptance Criteria (checkboxes)
+9. Success Metrics
+10. Dependencies
+11. Risks and Mitigation
+12. Troubleshooting Guide
+13. Notes for AI Agents
+14. Current Status
+
+Business Requirements = capabilities and rules **without** API routes or table names.
+Technical Requirements owns schema, endpoints, and UI.
+
+## When implementing from a PRD
+
+1. Read Problem, Business Requirements, and Hypothesis first.
+2. Honour Scope — do not build Out of Scope or Cut items.
+3. Update phase status markers as work progresses.
+4. **Document every final change in the appropriate PRD(s) before considering a phase done:**
+   - Feature work → the feature PRD (e.g. `docs/authentication/SIMPLE_AUTH_PRD.md`)
+   - Baseline facts that changed → the owning baseline PRD (e.g. `AUTHENTICATION_BASELINE_PRD.md`)
+   - System-wide map → `ARCHITECTURE.md` when layer behaviour changes
+   - Record: files touched, behaviour, test IDs, verification commands/results, troubleshooting
+5. Record real implementation under Technical Implementation Details (cite `filepath:line-number`).
+6. Check off Acceptance Criteria only when verified.
+7. Add Troubleshooting entries when bugs are found and fixed.
+8. Keep Current Status + Version / Version Notes current; drop outdated notes.
+9. Bump **Version** / **Version Notes** in the header when the PRD meaningfully changes.
+
+Layer conventions while coding: `01`…`07` rules. TDD: `07-tdd-workflow.mdc`.

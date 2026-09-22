@@ -1,13 +1,48 @@
-Date created: [Date]
-Date last modified: [Date]
-
 # [Feature Name] - Technical PRD
+
+| Field | Value |
+|-------|-------|
+| Created | [Month Day, Year] |
+| Version | 1.0 - Initial |
+| Version Notes | [One-line summary of what this PRD covers] |
+
+---
 
 ## Overview/Problem
 
 **Instructions**: Describe the specific problem this feature solves. Who experiences this problem? What happens today without this feature? Write 2-4 sentences of clear prose.
 
 **Example**: "Teachers currently have no way to verify that their quiz questions align with state curriculum standards. They spend significant time manually cross-referencing TEKS documents, leading to inconsistent coverage and wasted preparation time."
+
+---
+
+## Business Requirements
+
+**Instructions**: State the business capability this feature must deliver, independent of how it is built. Do not list API routes or table names here — those belong under Technical Requirements.
+
+**Required structure**: Group this section under **named business-area headings** that fit the feature (not a flat dump of mixed concerns).
+
+**Example for a login feature** — use headings such as:
+
+### Authentication
+### Session Management
+### Logout
+
+Under each business-area heading, include as needed:
+
+#### Users
+Who uses this capability, and in which role.
+
+#### Capabilities
+Numbered "the system shall" statements. Each one is a business outcome a user can recognise.
+
+#### Business rules
+Constraints that must hold regardless of technical design.
+
+#### Current fulfilment
+For **baseline** documents only: mark each capability Met / Partial / Not met against the running system. Omit for greenfield features.
+
+**Example prose**: "Teachers must be able to generate a quiz aligned to a chosen TEKS standard, review each question before assigning it, and discard a question without losing the rest of the draft."
 
 ---
 
@@ -267,7 +302,7 @@ CREATE TABLE table_name (
 ## Notes for AI Agents
 
 **Instructions for AI**: When working with this PRD:
-1. Start by reading the Problem and Hypothesis to understand intent
+1. Start by reading the Problem, Business Requirements, and Hypothesis to understand intent
 2. Use Scope (In/Out/Cut) to determine boundaries — do not build out-of-scope items
 3. Update phase status markers as work progresses
 4. Add implementation details under "Technical Implementation Details" as code is written

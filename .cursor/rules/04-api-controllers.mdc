@@ -1,0 +1,72 @@
+---
+description: API, errors, security — OpenAPI first, traps, Basic auth, catch-all 400
+alwaysApply: false
+---
+# 04 — API / controllers
+
+Backend: Spring Boot 3.2.1, context `/petclinic/`, port **9966**.
+API base: `http://localhost:9966/petclinic/api`. Docs: `docs/baseline/ARCHITECTURE.md`,
+slice PRDs (`AUTH-`…`VET-`).
+
+`openapi.yml` → generated `rest.api` + `rest.dto` (never edit `target/generated-sources`).
+
+## Never treat as regressions
+
+| Endpoint | Reality | Use instead |
+|---|---|---|
+| `GET /owners/{o}/pets/{p}` | always 400 (`B1`) | `GET /pets/{p}` |
+| `PUT /owners/{o}/pets/{p}` | 501 (`B2`) | `PUT /pets/{p}` |
+| `POST /pets`, `POST /visits` | 400 FK (`B3`) | nested `/owners/...` routes |
+| `GET /oops` | no controller (`B4`) | — |
+| `DELETE /pettypes/{id}` | destroys pets + visits, 204 (`PET-05`) | do not call casually |
+
+A **400** often means auth denial, FK conflict, or unmatched route — not bad JSON
+(`AUTH-01`). Read `className`. Empty lists return **404**, not `[]` (`OWN-01`).
+
+## Controller rules
+
+1. **New endpoint:** change `openapi.yml`, rebuild, then `@Override` the interface method
+   (missing override → **501**, `B2`).
+2. `readOnly: true` body fields are stripped (`ownerId` / `petId`) → flat `POST /pets` and
+   `POST /visits` fail FK (`B3`). Use nested owner routes or change the spec.
+3. Status conventions (don’t copy `POST /pets`’s 200/no Location — `PET-08`):
+
+   | Action | Status |
+   |---|---|
+   | create | `201` + `Location` |
+   | update / delete | `204` |
+   | missing | `404` |
+   | empty list | `404` (`OWN-01`) — not `[]` |
+
+4. DTOs: `XFields` (write) vs `X` (read with ids/nested). MapStruct in `mapper/`.
+5. Controllers: map → `ClinicService` → status. No business logic or repos.
+6. Keep `@CrossOrigin(exposedHeaders = "errors, content-type")`.
+
+## Error handling
+
+`ExceptionControllerAdvice` catch-all → always **400** with `{"className","exMessage"}`
+(`AUTH-01` / `AUTH-02`). Don’t pile logic into it — add specific handlers (403 / 409 / 404).
+Changing advice is API-wide (Authentication PRD); inventory `readme.md` first. Preserve
+`MethodArgumentNotValidException` → 400 + `errors` header. Stop leaking `className` when
+reworking.
+
+## Security
+
+`petclinic.security.enable` default **false**. Baseline:
+`docs/baseline/AUTHENTICATION_BASELINE_PRD.md`. SPA login feature:
+`docs/authentication/SIMPLE_AUTH_PRD.md` (Option A — reuse HTTP Basic).
+
+| Class | When | Effect |
+|---|---|---|
+| `WebSecurityConfig` | always | permit-all + CORS allow-list (often unused — `AUTH-09`) |
+| `DisableSecurityConfig` | `enable=false` | permit-all |
+| `BasicAuthenticationConfig` | `enable=true` | HTTP Basic + JDBC SQL; `@PreAuthorize` on; no `PasswordEncoder` `@Bean` |
+
+1. Don’t persist/echo passwords raw (`AUTH-03`, `AUTH-04`). Hashing needs wider
+   `users.password` + migrations (`01-database-schema.mdc`, `AUTH-06`/`AUTH-14`).
+2. Seed: `admin` / `{noop}admin`. Missing encoder prefix → cannot log in (`AUTH-05`).
+3. Roles via `@PreAuthorize("hasRole(@roles.…)")` only. Flat model: `ADMIN` ≠ other roles.
+4. `UserServiceImpl` adds `ROLE_` prefix on save.
+5. One CORS policy — annotations win today (`AUTH-09`). Keep `exposedHeaders: errors`.
+6. Secured mode 401s Swagger/health (`AUTH-08`) and SPA (`AUTH-07`) until frontend Option A
+   (`05-frontend.mdc`). Re-test auth **and** CORS on another port after security edits.

@@ -1,0 +1,50 @@
+---
+description: TDD workflow — write test, run all tests, change code, run all tests again
+alwaysApply: true
+---
+# 07 — TDD workflow
+
+For any behaviour change: **test first**. Do not change production code before the new
+test exists and the suite has been run.
+Where/how to write tests: `06-unit-testing.mdc`.
+New/updated feature docs: `00-technical-prd.mdc` + `docs/TEMPLATE_TECHNICAL_PRD.md`.
+
+## Required sequence
+
+1. **Write the test** — one focused failing test for the behaviour you want (Red).
+2. **Run all tests** — confirm the new test fails for the *right* reason, and the rest of
+   the suite is still green (or note any pre-existing failures).
+3. **Apply the change** — smallest production fix so the new test passes (Green).
+4. **Run all tests again** — new test and full suite must pass.
+5. **Refactor** (optional) — then run all tests once more.
+
+```bash
+# Backend — full suite
+./mvnw.cmd test
+
+# Backend — single test while iterating (still run full suite at steps 2 and 4)
+./mvnw.cmd -Dtest=UserRestControllerTests#testCreateUserSuccess test
+
+# Frontend — full suite
+cd client && npm test
+
+# Frontend — focused (still run full suite at steps 2 and 4)
+cd client && npm test -- --testPathPattern=util.test
+```
+
+**Do not:** implement then test; skip the full-suite runs at steps 2 and 4; disable tests to
+go green; weaken assertions to match the catch-all 400 unless the PRD says that status is
+expected.
+
+## Document in PRDs (every phase)
+
+After Red/Green (and before calling a phase complete), update the **feature PRD** and any
+**baseline / architecture** docs that the change makes stale: phase status, Technical
+Implementation Details (files + behaviour), test results, Acceptance Criteria, Current Status,
+Version Notes. Rule: `00-technical-prd.mdc`.
+
+## Working agreements
+
+- Verify with a real run; don’t infer.
+- Security default **off**. Test auth with `--petclinic.security.enable=true` on another port.
+- Seed counts / reseed: `01-database-schema.mdc`. Known broken routes: `04-api-controllers.mdc`.

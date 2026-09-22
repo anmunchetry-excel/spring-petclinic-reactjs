@@ -1,0 +1,32 @@
+---
+description: JPA entities — hierarchy, eager fetch, id equality, keep in sync with DDL
+alwaysApply: false
+---
+# 02 — Entity layer (`model/`)
+
+```
+BaseEntity → NamedEntity (Pet, PetType, Specialty) | Person (Owner, Vet) | Visit | Role
+User (username PK — not BaseEntity)
+```
+
+DDL is authoritative (`01-database-schema.mdc`). `ddl-auto=none`.
+
+## Rules
+
+1. Extend this hierarchy; don’t invent a parallel base type.
+2. Keep `FetchType.EAGER` unless you also fix DAO `join fetch` and Open-in-View
+   (`open-in-view=false`).
+3. **No `equals`/`hashCode` on `BaseEntity`.** Compare **ids**, never `entity.equals(other)`
+   across loads (`B1`). Controllers/services must use ids too.
+4. Annotation that implies schema → mirror in DDL (all dialects). Example: `Role`
+   `@UniqueConstraint` is never applied (`AUTH-13`).
+5. Keep entity validation aligned with OpenAPI/DTO rules (owner telephone `OWN-09`).
+6. Defensive collection getters stay as today (`Owner.getPets`, `Vet.getSpecialties`).
+7. No `Visit`↔`Vet` link without an explicit product + schema decision.
+8. Cascades: Owner→pets→visits, Pet→visits. Pet-type delete is owned by the DAO override
+   (`03-service-layer.mdc`, `PET-05`) — do not duplicate on the entity.
+
+```java
+// ❌ pet.getOwner().equals(owner)
+// ✅ Objects.equals(pet.getOwner().getId(), owner.getId())
+```

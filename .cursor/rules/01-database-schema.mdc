@@ -1,0 +1,23 @@
+---
+description: Database schema — hand-written DDL, three dialects, no Flyway/Liquibase
+alwaysApply: false
+---
+# 01 — Database schema
+
+No migration tool. Schema = `db/{hsqldb,mysql,postgresql}/initDB.sql` only.
+`spring.jpa.hibernate.ddl-auto=none`. Entity annotations do **not** create tables
+(see `02-entity-layer.mdc`).
+
+`initDB.sql` is **drop-and-recreate**. HSQLDB rebuilds every start; MySQL/PostgreSQL keep
+the old schema unless you apply DDL by hand (`spring.sql.init.*` is commented out —
+see `petclinic_db_setup_*.txt`).
+
+## Rules
+
+1. Change **all three dialects** (or justify one-dialect).
+2. Any new constraint/column in an entity → same change in DDL (all dialects).
+3. Prefer Flyway/Liquibase (`AUTH-14`) before large schema remediation. Blocked today:
+   widen `users.password`, `roles` uniqueness, `specialties.name` uniqueness,
+   `vet_specialties` uniqueness, owner telephone width.
+4. Seeds: `populateDB.sql`. After mutate, expect 10 owners, 13 pets, 6 types, 4 visits,
+   6 vets, 3 specialties — restart backend to reseed HSQLDB.
